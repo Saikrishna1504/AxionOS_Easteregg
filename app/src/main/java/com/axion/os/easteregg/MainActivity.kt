@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -71,6 +72,7 @@ class MainActivity : ComponentActivity() {
 val ExpoOut = Easing { x -> if (x == 1f) 1f else 1f - Math.pow(2.0, -10.0 * x.toDouble()).toFloat() }
 val BackEaseIn = Easing { x -> val s = 1.70158f; x * x * ((s + 1) * x - s) }
 
+data class Star(val x: Float, val y: Float, val size: Float, val speed: Float, val alpha: Float)
 data class Bullet(var position: Offset, val isEnemy: Boolean = false, val velocityX: Float = 0f)
 data class Particle(var pos: Offset, val vel: Offset, val color: Color, var life: Float, val size: Float = 4f)
 data class Shockwave(var radius: Float, var alpha: Float, val pos: Offset)
@@ -128,22 +130,136 @@ class StatsManager(context: Context) {
 
 @Composable
 fun MainContainer() {
-    var gameState by remember { mutableStateOf("ANIMATION") }
+    var gameState by remember { mutableStateOf("SPLASH") }
     val context = LocalContext.current
     val statsManager = remember { StatsManager(context) }
+    val stars = remember { List(100) { Star(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 1.5f + 0.5f, Random.nextFloat() * 0.08f + 0.02f, Random.nextFloat() * 0.3f + 0.1f) } }
+    val starOffset by rememberInfiniteTransition().animateFloat(0f, 1f, infiniteRepeatable(tween(10000, easing = LinearEasing)))
     
     Box(modifier = Modifier.fillMaxSize().background(Color.Black).systemBarsPadding()) {
-        Crossfade(targetState = gameState, animationSpec = tween(1000), label = "state") { state ->
-            when(state) {
-                "ANIMATION" -> AtomCrashGame(onFinish = { gameState = "GAME" })
-                "GAME" -> SpaceGame(statsManager = statsManager, onExit = { gameState = "ANIMATION" })
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            stars.forEach { star ->
+                val currentY = (star.y + starOffset * star.speed * 15f) % 1f
+                drawCircle(Color.White.copy(alpha = star.alpha), radius = star.size, center = Offset(star.x * size.width, currentY * size.height))
             }
         }
 
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val scanlineSpacing = 8f
-            for (y in 0..size.height.toInt() step scanlineSpacing.toInt()) {
-                drawLine(color = Color.Black.copy(alpha = 0.25f), start = Offset(0f, y.toFloat()), end = Offset(size.width, y.toFloat()), strokeWidth = 2f)
+        Crossfade(targetState = gameState, animationSpec = tween(1000), label = "state") { state ->
+            when(state) {
+                "SPLASH" -> SplashScreen(onFinish = { gameState = "ANIMATION" })
+                "ANIMATION" -> AtomCrashGame(onFinish = { gameState = "PREP" })
+                "PREP" -> CombatPrepScreen(onStart = { gameState = "GAME" })
+                "GAME" -> SpaceGame(statsManager = statsManager, onExit = { gameState = "SPLASH" })
+            }
+        }
+    }
+}
+
+@Composable
+fun CombatPrepScreen(onStart: () -> Unit) {
+    var text1Chars by remember { mutableIntStateOf(0) }
+    var text2Chars by remember { mutableIntStateOf(0) }
+    val fullText1 = "SYNCING FLIGHT COURSE..."
+    val fullText2 = "AXION COURSE PREPARED"
+    
+    val verticalBias = remember { Animatable(0f) } // 0 is center, -0.4 is towards top
+
+    LaunchedEffect(Unit) {
+        // Phase 1: Type text 1 at center
+        while (text1Chars < fullText1.length) {
+            delay(80)
+            text1Chars++
+        }
+        delay(600)
+        
+        // Phase 2: Move text 1 up
+        verticalBias.animateTo(-0.4f, tween(1000, easing = FastOutSlowInEasing))
+        delay(400)
+        
+        // Phase 3: Type text 2 below
+        while (text2Chars < fullText2.length) {
+            delay(60)
+            text2Chars++
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { 
+        if (text2Chars >= fullText2.length) onStart() 
+    }) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 32.dp)
+                .align(BiasAlignment(0f, verticalBias.value)),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = fullText1.take(text1Chars),
+                style = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Light, letterSpacing = 3.sp, color = Color.White, fontFamily = FontFamily.Monospace),
+                textAlign = TextAlign.Center
+            )
+
+            if (verticalBias.value < -0.1f) {
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    text = fullText2.take(text2Chars),
+                    style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, color = Color.White, fontFamily = FontFamily.Monospace),
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+
+        if (text2Chars >= fullText2.length) {
+            Text(
+                text = "TAP TO INITIATE",
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp),
+                style = TextStyle(fontSize = 12.sp, color = Color.White.copy(0.4f), letterSpacing = 6.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+            )
+        }
+    }
+}
+
+@Composable
+fun SplashScreen(onFinish: () -> Unit) {
+    var currentWordIndex by remember { mutableIntStateOf(0) }
+    val animatedWords = listOf("faster.", "more powerful.", "more reliable.", "axion.")
+    
+    LaunchedEffect(Unit) {
+        delay(1500)
+        currentWordIndex = 1
+        delay(1500)
+        currentWordIndex = 2
+        delay(1500)
+        currentWordIndex = 3
+        delay(2000)
+        onFinish()
+    }
+
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 40.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = "Axion", style = TextStyle(fontSize = 58.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color.White))
+                Text(text = "OS", style = TextStyle(fontSize = 58.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color.White, drawStyle = Stroke(width = 3f)))
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(24.dp)) {
+                Text("Make your android ", style = TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = Color.White.copy(0.6f)))
+                
+                AnimatedContent(
+                    targetState = currentWordIndex,
+                    transitionSpec = {
+                        (slideInVertically { height -> height } + fadeIn(tween(600))).togetherWith(
+                            slideOutVertically { height -> -height } + fadeOut(tween(600))
+                        )
+                    },
+                    label = "word_carousel"
+                ) { index ->
+                    val textColor = if (index == 3) Color.White else Color.White.copy(0.6f)
+                    Text(text = animatedWords[index], style = TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = textColor))
+                }
             }
         }
     }
@@ -186,8 +302,8 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
         // SECRET PROTOCOL STATE
         var secretTaps by remember { mutableIntStateOf(0) }
         var overdriveMode by remember { mutableStateOf(false) }
-        val shipAccentColor = if (overdriveMode) Color(0xFFFF007F) else Color.White
-        val thrusterColor = if (overdriveMode) Color(0xFFFF007F) else Color(0xFF4DB6AC)
+        val shipAccentColor = Color.White
+        val thrusterColor = Color.White.copy(alpha = 0.7f)
         
         var gameTime by remember { mutableLongStateOf(0L) }
         var lastFrameTime by remember { mutableLongStateOf(-1L) }
@@ -202,7 +318,7 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
         val animatedHealth by animateFloatAsState(targetValue = bossHealth / 100f, animationSpec = spring(stiffness = Spring.StiffnessLow), label = "health")
         
         val envColor by animateColorAsState(
-            targetValue = if (bossHealth in 1f..25f) Color(0xFF8A2B2B) else Color.White,
+            targetValue = if (bossHealth in 1f..25f) Color.Gray else Color.White,
             animationSpec = tween(1500), label = "env_color"
         )
 
@@ -410,24 +526,24 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
                     
                     if (bossHitFlash > 0f) {
                         val glitchOffset = Offset((Random.nextFloat() - 0.5f) * 15f, (Random.nextFloat() - 0.5f) * 15f)
-                        drawCircle(Color.Cyan.copy(alpha = 0.4f * bossHitFlash * dAlpha), radius = r, center = bossPos + glitchOffset, style = Stroke(4f))
-                        drawCircle(Color.Red.copy(alpha = 0.4f * bossHitFlash * dAlpha), radius = r, center = bossPos - glitchOffset, style = Stroke(4f))
+                        drawCircle(Color.White.copy(alpha = 0.4f * bossHitFlash * dAlpha), radius = r, center = bossPos + glitchOffset, style = Stroke(4f))
+                        drawCircle(Color.White.copy(alpha = 0.4f * bossHitFlash * dAlpha), radius = r, center = bossPos - glitchOffset, style = Stroke(4f))
                     }
                     
                     val bossPath = Path().apply { addOval(Rect(bossPos - Offset(r, r), Size(r * 2, r * 2))) }
                     
                     clipPath(bossPath) {
-                        drawRect(Color(0xFFA08A38).copy(alpha = dAlpha), topLeft = Offset(bossPos.x - r, bossPos.y - r), size = Size(r * 2, r * 2))
-                        drawRect(Color(0xFF8A4B38).copy(alpha = dAlpha), topLeft = Offset(bossPos.x - r * 0.6f, bossPos.y - r), size = Size(r * 1.2f, r * 2))
-                        drawRect(Color(0xFF8A2B2B).copy(alpha = dAlpha), topLeft = Offset(bossPos.x - r * 0.2f, bossPos.y - r), size = Size(r * 0.4f, r * 2))
+                        drawRect(Color(0xFF888888).copy(alpha = dAlpha), topLeft = Offset(bossPos.x - r, bossPos.y - r), size = Size(r * 2, r * 2))
+                        drawRect(Color(0xFF666666).copy(alpha = dAlpha), topLeft = Offset(bossPos.x - r * 0.6f, bossPos.y - r), size = Size(r * 1.2f, r * 2))
+                        drawRect(Color(0xFF444444).copy(alpha = dAlpha), topLeft = Offset(bossPos.x - r * 0.2f, bossPos.y - r), size = Size(r * 0.4f, r * 2))
                     }
                     
-                    drawCircle(color = Color(0xFFE6A04D).copy(alpha = dAlpha), radius = r, center = bossPos, style = Stroke(3f))
+                    drawCircle(color = Color.White.copy(alpha = dAlpha), radius = r, center = bossPos, style = Stroke(3f))
                     
                     rotate(gameTime * 0.05f, bossPos) {
                         val arcRadius = r + 10f
-                        drawArc(color = Color(0xFF2E86C1).copy(alpha = dAlpha), startAngle = 135f, sweepAngle = 90f, useCenter = false, topLeft = Offset(bossPos.x - arcRadius, bossPos.y - arcRadius), size = Size(arcRadius * 2, arcRadius * 2), style = Stroke(width = 4f, cap = StrokeCap.Round))
-                        drawArc(color = Color(0xFF2E86C1).copy(alpha = dAlpha), startAngle = -45f, sweepAngle = 90f, useCenter = false, topLeft = Offset(bossPos.x - arcRadius, bossPos.y - arcRadius), size = Size(arcRadius * 2, arcRadius * 2), style = Stroke(width = 4f, cap = StrokeCap.Round))
+                        drawArc(color = Color.Gray.copy(alpha = dAlpha), startAngle = 135f, sweepAngle = 90f, useCenter = false, topLeft = Offset(bossPos.x - arcRadius, bossPos.y - arcRadius), size = Size(arcRadius * 2, arcRadius * 2), style = Stroke(width = 4f, cap = StrokeCap.Round))
+                        drawArc(color = Color.Gray.copy(alpha = dAlpha), startAngle = -45f, sweepAngle = 90f, useCenter = false, topLeft = Offset(bossPos.x - arcRadius, bossPos.y - arcRadius), size = Size(arcRadius * 2, arcRadius * 2), style = Stroke(width = 4f, cap = StrokeCap.Round))
                     }
 
                     if (bossHitFlash > 0f) {
@@ -466,11 +582,11 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
                 }
                 
                 damageTexts.forEach { dt ->
-                    val layout = textMeasurer.measure(dt.text, style = TextStyle(color = Color(0xFFE6A04D).copy(alpha = dt.life), fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold))
+                    val layout = textMeasurer.measure(dt.text, style = TextStyle(color = Color.White.copy(alpha = dt.life), fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold))
                     drawText(layout, topLeft = dt.pos)
                 }
 
-                val damageColors = listOf(Color(0xFF2E86C1), Color(0xFFA08A38), Color(0xFF8A4B38), Color(0xFF8A2B2B)) 
+                val damageColors = listOf(Color.White, Color.LightGray, Color.Gray, Color.DarkGray) 
                 bullets.forEach { b -> 
                     if (b.isEnemy) {
                         val color = damageColors[bullets.indexOf(b) % damageColors.size]
@@ -508,13 +624,13 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("ORB", color = Color.White.copy(0.5f), fontSize = 10.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(end = 12.dp))
                         Box(modifier = Modifier.width(160.dp).height(6.dp).background(Color.White.copy(0.1f))) {
-                            Box(modifier = Modifier.fillMaxHeight().fillMaxWidth(animatedHealth).background(Color(0xFF4DB6AC))) 
+                            Box(modifier = Modifier.fillMaxHeight().fillMaxWidth(animatedHealth).background(Color.White)) 
                         }
                         Spacer(Modifier.width(12.dp))
                         Text("${(bossHealth * 20.26f).toInt()}/2026", color = Color.White.copy(0.5f), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                     }
                     Spacer(Modifier.height(10.dp))
-                    Text("$missionStartTime > MISSION START", color = Color(0xFFE6A04D), fontSize = 10.sp, fontFamily = FontFamily.Monospace, letterSpacing = 1.sp)
+                    Text("$missionStartTime > MISSION START", color = Color.White, fontSize = 10.sp, fontFamily = FontFamily.Monospace, letterSpacing = 1.sp)
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(text = "T+ $timeStr", color = Color.White, style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Normal, fontFamily = FontFamily.Monospace, letterSpacing = 2.sp))
@@ -554,7 +670,7 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
                             }
                         }
                         Spacer(Modifier.height(48.dp))
-                        Text("TAP TO REINITIALIZE >", modifier = Modifier.clickable { scope.launch { destructionProgress.snapTo(0f) }; onExit() }, color = Color(0xFFE6A04D), fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text("TAP TO REINITIALIZE >", modifier = Modifier.clickable { scope.launch { destructionProgress.snapTo(0f) }; onExit() }, color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     }
                 }
             }
@@ -570,10 +686,6 @@ fun AtomCrashGame(onFinish: () -> Unit) {
     
     var remainingAtoms by remember { mutableIntStateOf(5) }
     var isExploding by remember { mutableStateOf(false) }
-    var showFinalText by remember { mutableStateOf(false) }
-    
-    var currentWordIndex by remember { mutableIntStateOf(0) }
-    val animatedWords = listOf("faster.", "more powerful.", "more reliable.", "axion.")
     
     val crashProgress = remember { Animatable(0f) }
     val explosionProgress = remember { Animatable(0f) }
@@ -584,19 +696,6 @@ fun AtomCrashGame(onFinish: () -> Unit) {
     val slowGlobalRotation by rememberInfiniteTransition().animateFloat(0f, 360f, infiniteRepeatable(tween(25000, easing = LinearEasing)))
     val corePulse by rememberInfiniteTransition().animateFloat(0.8f, 1.4f, infiniteRepeatable(tween(1200, easing = FastOutSlowInEasing), RepeatMode.Reverse))
     val rotation by rememberInfiniteTransition().animateFloat(0f, 360f, infiniteRepeatable(tween(7000, easing = LinearEasing)))
-
-    LaunchedEffect(showFinalText) {
-        if (showFinalText) {
-            delay(1200)
-            currentWordIndex = 1 
-            delay(1200)
-            currentWordIndex = 2 
-            delay(1200)
-            currentWordIndex = 3 
-            delay(2500) 
-            onFinish()
-        }
-    }
 
     Box(modifier = Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
         if (remainingAtoms > 0 && !crashProgress.isRunning && !isExploding) {
@@ -611,7 +710,8 @@ fun AtomCrashGame(onFinish: () -> Unit) {
                     isExploding = true
                     launch { flashAlpha.animateTo(0.5f, tween(40)); flashAlpha.animateTo(0f, tween(1200)) }
                     explosionProgress.animateTo(1f, tween(1500, easing = ExpoOut))
-                    showFinalText = true
+                    delay(1600)
+                    onFinish()
                 }
                 crashProgress.snapTo(0f)
             }
@@ -621,7 +721,7 @@ fun AtomCrashGame(onFinish: () -> Unit) {
             val centerX = size.width / 2
             val centerY = size.height / 2
             
-            if (!showFinalText || isExploding) {
+            if (!isExploding || (isExploding && explosionProgress.value < 1f)) {
                 val alpha = (1f - explosionProgress.value).coerceAtLeast(0f)
                 
                 rotate(slowGlobalRotation, Offset(centerX, centerY)) {
@@ -634,7 +734,7 @@ fun AtomCrashGame(onFinish: () -> Unit) {
                     val nRadius = (26.dp.toPx() * nucleusScale.value) + (if (isExploding) explosionProgress.value * 380.dp.toPx() else 0f)
                     
                     if (alpha > 0f) {
-                        drawCircle(Color(0xFF4DB6AC).copy(alpha = 0.2f * alpha), radius = nRadius * 1.5f * corePulse, center = Offset(centerX, centerY))
+                        drawCircle(Color.White.copy(alpha = 0.1f * alpha), radius = nRadius * 1.5f * corePulse, center = Offset(centerX, centerY))
                         drawCircle(Color.White.copy(alpha), radius = nRadius, center = Offset(centerX, centerY))
                         drawCircle(Color.Black.copy(alpha), radius = nRadius*0.88f, center = Offset(centerX, centerY))
                         drawCircle(Color.White.copy(alpha*0.8f), radius = nRadius*0.35f, center = Offset(centerX, centerY))
@@ -656,38 +756,6 @@ fun AtomCrashGame(onFinish: () -> Unit) {
         }
         
         Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = flashAlpha.value)))
-        
-        AnimatedVisibility(visible = showFinalText, enter = fadeIn(tween(1800))) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 40.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "Axion", style = TextStyle(fontSize = 58.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color.White))
-                    Text(text = "OS", style = TextStyle(fontSize = 58.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color.White, drawStyle = Stroke(width = 3f)))
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(24.dp)) {
-                    Text("Make your android ", style = TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = Color.White.copy(0.6f)))
-                    
-                    AnimatedContent(
-                        targetState = currentWordIndex,
-                        transitionSpec = {
-                            if (targetState > initialState) {
-                                (slideInVertically { height -> height } + fadeIn(tween(400))).togetherWith(
-                                    slideOutVertically { height -> -height } + fadeOut(tween(400))
-                                )
-                            } else {
-                                fadeIn() togetherWith fadeOut()
-                            }
-                        },
-                        label = "word_carousel"
-                    ) { index ->
-                        val textColor = if (index == 3) Color(0xFF4DB6AC) else Color.White.copy(0.6f)
-                        Text(text = animatedWords[index], style = TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = textColor))
-                    }
-                }
-            }
-        }
     }
 }
 
