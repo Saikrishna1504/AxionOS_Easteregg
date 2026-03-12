@@ -1,6 +1,5 @@
 package com.axion.os.easteregg
 
-import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -9,6 +8,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -32,6 +32,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -64,90 +65,121 @@ val ExpoOut = Easing { x -> if (x == 1f) 1f else 1f - 2.0.pow(-10.0 * x.toDouble
 val BackEaseIn = Easing { x -> val s = 1.70158f; x * x * ((s + 1) * x - s) }
 
 data class Star(val x: Float, val y: Float, val size: Float, val speed: Float, val alpha: Float)
-data class Bullet(var position: Offset, val isEnemy: Boolean = false)
+data class Bullet(var position: Offset, val color: Color = Color.White, val damage: Int = 150, val isEnemy: Boolean = false)
 data class Particle(val pos: Offset, val vel: Offset, val color: Color, var life: Float, val size: Float = 4f)
+data class CombatLog(val message: String, val color: Color)
 
-data class GameStat(
-    val timestamp: Long, 
-    val result: String, 
-    val time: String,
-    val accuracy: Int
-)
+data class GameStat(val timestamp: Long, val result: String, val time: String, val accuracy: Int)
 
-class StatsManager(context: Context) {
-    private val prefs = context.getSharedPreferences("axion_stats_v2", Context.MODE_PRIVATE)
-    
-    fun saveStat(stat: GameStat) {
-        val currentStats = getHistory().toMutableList()
-        currentStats.add(0, stat)
-        val limitedStats = currentStats.take(10)
-        
+class StatsManager(context: android.content.Context) {
+    private val prefs = context.getSharedPreferences("axion_stats_final_v16", android.content.Context.MODE_PRIVATE)
+    var history by mutableStateOf(getHistoryFromPrefs())
+        private set
+
+    fun save(stat: GameStat) {
+        val current = getHistoryFromPrefs().toMutableList()
+        current.add(0, stat)
+        val limited = current.take(10)
         val array = JSONArray()
-        limitedStats.forEach {
-            val obj = JSONObject()
-            obj.put("ts", it.timestamp)
-            obj.put("res", it.result)
-            obj.put("time", it.time)
-            obj.put("acc", it.accuracy)
+        limited.forEach { 
+            val obj = JSONObject(); obj.put("ts", it.timestamp); obj.put("res", it.result); obj.put("time", it.time); obj.put("acc", it.accuracy)
             array.put(obj)
         }
-        
-        val totalWins = prefs.getInt("total_wins", 0) + (if (stat.result == "WON") 1 else 0)
-        val totalGames = prefs.getInt("total_games", 0) + 1
-        
-        prefs.edit()
-            .putString("history", array.toString())
-            .putInt("total_wins", totalWins)
-            .putInt("total_games", totalGames)
-            .apply()
+        prefs.edit().putString("history", array.toString()).apply()
+        history = limited
     }
-    
-    fun getHistory(): List<GameStat> {
+
+    private fun getHistoryFromPrefs(): List<GameStat> {
         val json = prefs.getString("history", null) ?: return emptyList()
-        val list = mutableListOf<GameStat>()
-        val array = JSONArray(json)
+        val list = mutableListOf<GameStat>(); val array = JSONArray(json)
         for (i in 0 until array.length()) {
             val obj = array.getJSONObject(i)
-            list.add(GameStat(
-                obj.getLong("ts"), 
-                obj.getString("res"), 
-                obj.getString("time"),
-                obj.optInt("acc", 0)
-            ))
+            list.add(GameStat(obj.getLong("ts"), obj.getString("res"), obj.getString("time"), obj.optInt("acc", 0)))
         }
         return list
     }
-
-    fun getLifetimeWins() = prefs.getInt("total_wins", 0)
-    fun getLifetimeGames() = prefs.getInt("total_games", 0)
 }
 
 @Composable
 fun MainContainer() {
-    var gameState by remember { mutableStateOf("ANIMATION") }
+    var gameState by remember { mutableStateOf("SPLASH") }
     val context = LocalContext.current
     val statsManager = remember { StatsManager(context) }
     
     Box(modifier = Modifier.fillMaxSize().background(Color.Black).statusBarsPadding()) {
-        val layer1 = remember { List(60) { Star(Random.nextFloat(), Random.nextFloat(), 1f, 0.04f, 0.15f) } }
-        val layer2 = remember { List(40) { Star(Random.nextFloat(), Random.nextFloat(), 1.5f, 0.08f, 0.3f) } }
-        val layer3 = remember { List(25) { Star(Random.nextFloat(), Random.nextFloat(), 2.2f, 0.15f, 0.5f) } }
+        val stars = remember { List(100) { Star(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 1.5f + 0.5f, Random.nextFloat() * 0.1f + 0.05f, Random.nextFloat() * 0.4f + 0.1f) } }
         val starOffset by rememberInfiniteTransition().animateFloat(0f, 1f, infiniteRepeatable(tween(10000, easing = LinearEasing)))
 
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val drawStar: (Star, Float) -> Unit = { star, offset ->
-                val y = (star.y + offset * star.speed) % 1f
-                drawCircle(Color.White.copy(alpha = star.alpha), radius = star.size, center = Offset(star.x * size.width, y * size.height))
+            stars.forEach { star ->
+                val currentY = (star.y + starOffset * star.speed * 20f) % 1f
+                drawCircle(Color.White.copy(alpha = star.alpha), radius = star.size, center = Offset(star.x * size.width, currentY * size.height))
             }
-            layer1.forEach { drawStar(it, starOffset) }
-            layer2.forEach { drawStar(it, starOffset) }
-            layer3.forEach { drawStar(it, starOffset) }
         }
 
-        Crossfade(targetState = gameState, animationSpec = tween(1000), label = "state") { state ->
+        Crossfade(targetState = gameState, animationSpec = tween(1200)) { state ->
             when(state) {
-                "ANIMATION" -> AtomCrashGame(onFinish = { gameState = "GAME" })
-                "GAME" -> SpaceGame(statsManager = statsManager, onExit = { gameState = "ANIMATION" })
+                "SPLASH" -> SplashScreen(onFinish = { gameState = "ANIMATION" })
+                "ANIMATION" -> AtomCrashGame(onFinish = { gameState = "PREP" })
+                "PREP" -> CombatPrepScreen(onStart = { gameState = "GAME" })
+                "GAME" -> SpaceGame(statsManager, onExit = { gameState = "SUMMARY" })
+                "SUMMARY" -> SummaryScreen(statsManager, onExit = { gameState = "SPLASH" })
+            }
+        }
+    }
+}
+
+@Composable
+fun SplashScreen(onFinish: () -> Unit) {
+    LaunchedEffect(Unit) { delay(3000); onFinish() }
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Axion", style = TextStyle(fontSize = 56.sp, fontWeight = FontWeight.ExtraLight, color = Color.White, letterSpacing = 2.sp))
+                Text("OS", style = TextStyle(fontSize = 56.sp, fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 2.sp, drawStyle = Stroke(width = 2f)))
+            }
+            Spacer(Modifier.height(16.dp))
+            Text("Make your android faster.\nmore powerful.\nmore reliable.\naxion.", style = TextStyle(fontSize = 12.sp, color = Color.White.copy(0.4f), textAlign = TextAlign.Center, letterSpacing = 2.sp), lineHeight = 20.sp)
+        }
+    }
+}
+
+@Composable
+fun CombatPrepScreen(onStart: () -> Unit) {
+    var visibleChars by remember { mutableIntStateOf(0) }
+    val fullText = "SYNCING FLIGHT COURSE..."
+    LaunchedEffect(Unit) { while (visibleChars < fullText.length) { delay(100); visibleChars++ } }
+
+    Box(modifier = Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onStart() }) {
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 80.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = if (visibleChars < fullText.length) fullText.take(visibleChars) else "-> AXION COURSE ENGAGED",
+                style = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Light, letterSpacing = 4.sp, color = Color.White),
+                textAlign = TextAlign.Center
+            )
+
+            if (visibleChars >= fullText.length) {
+                Spacer(Modifier.weight(1f))
+                Box(modifier = Modifier.size(240.dp), contentAlignment = Alignment.Center) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val center = Offset(size.width / 2, size.height / 2)
+                        drawCircle(Color.White, radius = 90.dp.toPx(), center = center, style = Stroke(2.dp.toPx()))
+                        drawCircle(Color.Black, radius = 88.dp.toPx(), center = center)
+                        drawCircle(Color.White.copy(0.7f), radius = 35.dp.toPx(), center = center, style = Stroke(1.dp.toPx()))
+                        drawArc(Color.White.copy(0.2f), 180f, 120f, false, center - Offset(105.dp.toPx(), 105.dp.toPx()), Size(210.dp.toPx(), 210.dp.toPx()), style = Stroke(4.dp.toPx()))
+                        drawArc(Color.White.copy(0.2f), 0f, 120f, false, center - Offset(105.dp.toPx(), 105.dp.toPx()), Size(210.dp.toPx(), 210.dp.toPx()), style = Stroke(4.dp.toPx()))
+                        val gRect = Rect(center.x - 45.dp.toPx(), center.y - 45.dp.toPx(), center.x + 45.dp.toPx(), center.y + 45.dp.toPx())
+                        drawArc(Color.White, 35f, 290f, false, gRect.topLeft, gRect.size, style = Stroke(7.dp.toPx()))
+                        drawLine(Color.White, center, Offset(center.x + 45.dp.toPx(), center.y), strokeWidth = 7.dp.toPx())
+                    }
+                }
+                Spacer(Modifier.height(40.dp))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    DamageKeyRow(Color.White.copy(0.2f), "0 DAMAGE (SHIELD)")
+                    DamageKeyRow(Color.White, "150 DAMAGE (CORE)")
+                }
+                Spacer(Modifier.weight(1f))
+                Text("TAP TO INITIATE", style = TextStyle(fontSize = 12.sp, color = Color.White.copy(0.4f), letterSpacing = 6.sp, fontWeight = FontWeight.Bold))
             }
         }
     }
@@ -156,102 +188,96 @@ fun MainContainer() {
 @Composable
 fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
     val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    var gameTimeByFrame by remember { mutableLongStateOf(0L) }
     
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val screenWidth = constraints.maxWidth.toFloat()
-        val screenHeight = constraints.maxHeight.toFloat()
-        
-        var shipPos by remember { mutableStateOf(Offset(screenWidth / 2, screenHeight * 0.85f)) }
-        var shipLean by remember { mutableFloatStateOf(0f) }
-        var bossPos by remember { mutableStateOf(Offset(screenWidth / 2, -200f)) }
-        var bossHealth by remember { mutableStateOf(100f) }
+        val sw = constraints.maxWidth.toFloat(); val sh = constraints.maxHeight.toFloat()
+        var shipPos by remember { mutableStateOf(Offset(sw / 2, sh * 0.85f)) }
+        var bossPos by remember { mutableStateOf(Offset(sw / 2, -200f)) }
+        var bossHealth by remember { mutableStateOf(2500f) }
         var gameStatus by remember { mutableStateOf("PLAYING") }
         
         val bullets = remember { mutableStateListOf<Bullet>() }
         val particles = remember { mutableStateListOf<Particle>() }
+        val logs = remember { mutableStateListOf<CombatLog>() }
+        var firedCount by remember { mutableIntStateOf(0) }; var hitCount by remember { mutableIntStateOf(0) }
         var gameTime by remember { mutableLongStateOf(0L) }
-        val destructionProgress = remember { Animatable(0f) }
-        
-        var bulletsFired by remember { mutableIntStateOf(0) }
-        var hitsConfirmed by remember { mutableIntStateOf(0) }
-
-        val animatedHealth by animateFloatAsState(
-            targetValue = bossHealth / 100f,
-            animationSpec = spring(stiffness = Spring.StiffnessLow), label = "health"
-        )
+        val animH by animateFloatAsState(bossHealth / 2500f, spring(Spring.DampingRatioNoBouncy), label = "h")
+        val breakdownProgress = remember { Animatable(0f) }
 
         LaunchedEffect(Unit) {
-            var startTime = -1L
-            var lastBossShot = 0L
+            val coreRadiusPx = with(density) { 110.dp.toPx() }
+            val shieldRadiusPx = with(density) { 150.dp.toPx() }
+            
+            var start = -1L; var lastShot = 0L
             while(gameStatus == "PLAYING") {
-                withFrameMillis { frameTime ->
-                    if (startTime == -1L) startTime = frameTime
-                    gameTime = frameTime - startTime
+                withFrameMillis { now ->
+                    if (start == -1L) start = now
+                    gameTime = now - start; gameTimeByFrame = gameTime
+                    val xVal = (sw/2) + sin(gameTime/700f)*(sw*0.4f)
+                    val yVal = sh*0.12f + (1f + sin(gameTime/1200f))*sh*0.22f
+                    bossPos = Offset(xVal, yVal)
                     
-                    val loopDuration = 9000L
-                    val progress = (gameTime % loopDuration).toFloat() / loopDuration
-                    val yCycle = if (progress < 0.5f) progress * 2 else (1f - progress) * 2
-                    bossPos = Offset(
-                        (screenWidth / 2) + sin(gameTime / 600f) * (screenWidth * 0.32f),
-                        screenHeight * 0.12f + yCycle * (screenHeight * 0.35f)
-                    )
-
-                    if (gameTime - lastBossShot > 1300L) {
-                        bullets.add(Bullet(bossPos + Offset(0f, 100f), isEnemy = true))
-                        lastBossShot = gameTime
+                    val shotInterval = if (bossHealth < 500) 800L else if (bossHealth < 1500) 1100L else 1500L
+                    if (gameTime - lastShot > shotInterval) {
+                        if (bossHealth < 500) { 
+                            bullets.add(Bullet(bossPos + Offset(-40f, 80f), Color.White, 0, true))
+                            bullets.add(Bullet(bossPos + Offset(0f, 100f), Color.White, 0, true))
+                            bullets.add(Bullet(bossPos + Offset(40f, 80f), Color.White, 0, true))
+                        } else if (bossHealth < 1500) { 
+                            bullets.add(Bullet(bossPos + Offset(-30f, 80f), Color.White, 0, true))
+                            bullets.add(Bullet(bossPos + Offset(30f, 80f), Color.White, 0, true))
+                        } else { bullets.add(Bullet(bossPos + Offset(0f, 100f), Color.White, 0, true)) }
+                        lastShot = gameTime
                     }
-                    
-                    val bIterator = bullets.listIterator()
-                    while(bIterator.hasNext()) {
-                        val b = bIterator.next()
+
+                    val bIt = bullets.listIterator()
+                    while(bIt.hasNext()) {
+                        val b = bIt.next()
                         if (b.isEnemy) {
                             b.position = Offset(b.position.x, b.position.y + 14f)
-                            if ((b.position - shipPos).getDistance() < 55f) {
-                                gameStatus = "LOST"
-                                launch { 
+                            if ((b.position - shipPos).getDistance() < 50f) {
+                                gameStatus = "BREAKDOWN"
+                                scope.launch {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    destructionProgress.animateTo(1f, tween(1000, easing = LinearOutSlowInEasing))
+                                    repeat(20) { particles.add(Particle(shipPos, Offset(Random.nextFloat()*40-20, Random.nextFloat()*40-20), Color.White, 1.5f, 6f)) }
+                                    breakdownProgress.animateTo(1f, tween(1000))
+                                    gameStatus = "LOST"
                                 }
                             }
                         } else {
-                            b.position = Offset(b.position.x, b.position.y - 48f)
-                            if ((b.position - bossPos).getDistance() < 110f) {
-                                bossHealth -= 3f
-                                hitsConfirmed++
-                                bIterator.remove()
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                repeat(5) { particles.add(Particle(b.position, Offset(Random.nextFloat()*20-10, Random.nextFloat()*20-10), Color.White, 1f)) }
-                                if (bossHealth <= 0) {
-                                    bossHealth = 0f
-                                    gameStatus = "WON"
-                                    launch { 
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        destructionProgress.animateTo(1f, tween(1200, easing = LinearOutSlowInEasing))
-                                    }
-                                }
+                            b.position = Offset(b.position.x, b.position.y - 45f)
+                            val dist = (b.position - bossPos).getDistance()
+                            
+                            if (dist < shieldRadiusPx) { 
+                                val isCoreHit = dist < coreRadiusPx
+                                val finalDamage = if (isCoreHit) 150 else 0
+                                bossHealth -= finalDamage.toFloat()
+                                if (finalDamage > 0) hitCount++
+                                bIt.remove()
+                                
+                                val logMsg = if (finalDamage > 0) "HIT >> [DEALT 150 DMG]" else "SHIELDED >> [0 DMG]"
+                                logs.add(0, CombatLog(logMsg, Color.White)); if (logs.size > 4) logs.removeLast()
+                                haptic.performHapticFeedback(if (finalDamage > 0) HapticFeedbackType.TextHandleMove else HapticFeedbackType.LongPress)
+                                repeat(6) { particles.add(Particle(b.position, Offset(Random.nextFloat()*20-10, Random.nextFloat()*20-10), Color.White, 1f)) }
+                                if (bossHealth <= 0) { bossHealth = 0f; gameStatus = "WON" }
                                 continue
                             }
                         }
-                        if (b.position.y < -150f || b.position.y > screenHeight + 150f) bIterator.remove()
+                        if (b.position.y < -150f || b.position.y > sh + 150f) bIt.remove()
                     }
-                    
-                    val pIterator = particles.listIterator()
-                    while(pIterator.hasNext()) {
-                        val p = pIterator.next()
-                        p.life -= 0.05f
-                        if (p.life <= 0) pIterator.remove()
-                    }
+                    val pIt = particles.listIterator()
+                    while(pIt.hasNext()) { val p = pIt.next(); p.life -= 0.05f; if (p.life <= 0) pIt.remove() }
                 }
             }
-            if (gameStatus != "PLAYING") {
-                val centis = (gameTime % 1000) / 10
-                val secs = (gameTime / 1000) % 60
-                val mins = (gameTime / 60000)
+            if (gameStatus != "PLAYING" && gameStatus != "BREAKDOWN") {
+                val acc = if (firedCount > 0) (hitCount * 100 / firedCount) else 0
+                val centis = (gameTime % 1000) / 10; val secs = (gameTime / 1000) % 60; val mins = (gameTime / 60000)
                 val timeStr = "${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${centis.toString().padStart(2, '0')}"
-                val acc = if (bulletsFired > 0) (hitsConfirmed * 100 / bulletsFired) else 0
-                statsManager.saveStat(GameStat(System.currentTimeMillis(), gameStatus, timeStr, acc))
-                delay(5000)
-                onExit()
+                statsManager.save(GameStat(System.currentTimeMillis(), gameStatus, timeStr, acc))
+                delay(3500); onExit()
             }
         }
 
@@ -262,136 +288,69 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
                     event.changes.forEach { change ->
                         if (gameStatus == "PLAYING") {
                             if (change.pressed && !change.previousPressed) {
-                                bullets.add(Bullet(Offset(shipPos.x, shipPos.y - 60f)))
-                                bulletsFired++
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                bullets.add(Bullet(Offset(shipPos.x, shipPos.y - 60f), Color.White, 150))
+                                firedCount++; haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             }
                             if (change.pressed) {
-                                val move = change.positionChange()
-                                shipLean = (move.x * 0.8f).coerceIn(-25f, 25f)
-                                shipPos = Offset((shipPos.x + move.x).coerceIn(60f, screenWidth - 60f), (shipPos.y + move.y).coerceIn(200f, screenHeight - 120f))
+                                val m = change.positionChange()
+                                shipPos = Offset((shipPos.x + m.x).coerceIn(50f, sw - 50f), (shipPos.y + m.y).coerceIn(sh*0.3f, sh - 100f))
                                 change.consume()
-                            } else { shipLean = 0f }
+                            }
                         }
                     }
                 }
             }
         }) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                if (gameStatus == "PLAYING" || gameStatus == "LOST" || (gameStatus == "WON" && destructionProgress.value < 1f)) {
-                    val dAlpha = if (gameStatus == "WON") (1f - destructionProgress.value) else 1f
-                    val dScale = if (gameStatus == "WON") (1f + destructionProgress.value * 0.5f) else 1f
-                    val pulse = if (gameStatus == "PLAYING") sin(gameTime / 180f) * 0.1f else 0f
-                    drawCircle(Color.White.copy(0.12f * dAlpha), radius = 240f * (1f + pulse) * dScale, center = bossPos)
-                    drawCircle(Color.White.copy(dAlpha), radius = 100f * dScale, center = bossPos, style = Stroke(2.5.dp.toPx()))
-                    rotate(gameTime / 8f, pivot = bossPos) {
-                        drawArc(Color.White.copy(0.4f * dAlpha), 0f, 60f, false, bossPos - Offset(125f, 125f), Size(250f, 250f), style = Stroke(1.5.dp.toPx()))
-                        drawArc(Color.White.copy(0.4f * dAlpha), 180f, 60f, false, bossPos - Offset(125f, 125f), Size(250f, 250f), style = Stroke(1.5.dp.toPx()))
+                val coreRadiusPx = 130.dp.toPx()
+                val outerRadiusPx = 150.dp.toPx()
+                
+                if (gameStatus != "WON") {
+                    val pulse = sin(gameTimeByFrame / 150f) * 0.15f
+                    drawCircle(Color.White.copy(0.08f), radius = outerRadiusPx * (1f + pulse), center = bossPos)
+                    drawCircle(Color.White, radius = coreRadiusPx, center = bossPos, style = Stroke(2.5.dp.toPx()))
+                    drawCircle(Color.Black, radius = coreRadiusPx - 2.dp.toPx(), center = bossPos)
+                    drawCircle(Color.White.copy(0.6f), radius = 50.dp.toPx(), center = bossPos, style = Stroke(1.dp.toPx()))
+                    rotate(gameTimeByFrame / 8f, pivot = bossPos) {
+                        drawArc(Color.White.copy(0.4f), 0f, 60f, false, bossPos - Offset(160.dp.toPx(), 160.dp.toPx()), Size(320.dp.toPx(), 320.dp.toPx()), style = Stroke(2.dp.toPx()))
+                        drawArc(Color.White.copy(0.4f), 180f, 60f, false, bossPos - Offset(160.dp.toPx(), 160.dp.toPx()), Size(320.dp.toPx(), 320.dp.toPx()), style = Stroke(2.dp.toPx()))
                     }
-                    val gRect = Rect(bossPos.x - 45f * dScale, bossPos.y - 45f * dScale, bossPos.x + 45f * dScale, bossPos.y + 45f * dScale)
-                    drawArc(Color.White.copy(dAlpha), 35f, 290f, false, gRect.topLeft, gRect.size, style = Stroke(6.dp.toPx() * dAlpha.coerceAtLeast(0.1f)))
-                    drawLine(Color.White.copy(dAlpha), bossPos, Offset(bossPos.x + 45f * dScale, bossPos.y), strokeWidth = 6.dp.toPx())
+                    val gRect = Rect(bossPos.x - 50.dp.toPx(), bossPos.y - 50.dp.toPx(), bossPos.x + 50.dp.toPx(), bossPos.y + 50.dp.toPx())
+                    drawArc(Color.White, 35f, 290f, false, gRect.topLeft, gRect.size, style = Stroke(8.dp.toPx()))
+                    drawLine(Color.White, bossPos, Offset(bossPos.x + 50.dp.toPx(), bossPos.y), strokeWidth = 8.dp.toPx())
+                }
+                
+                if (gameStatus != "LOST") {
+                    val dAlpha = 1f - breakdownProgress.value
+                    val dExpand = breakdownProgress.value * 80f
+                    rotate(0f, pivot = shipPos) {
+                        val shipPath = Path().apply { moveTo(shipPos.x, shipPos.y-50f - dExpand); lineTo(shipPos.x-35f - dExpand, shipPos.y+30f + dExpand); lineTo(shipPos.x, shipPos.y+12f); lineTo(shipPos.x+35f + dExpand, shipPos.y+30f + dExpand); close() }
+                        drawPath(shipPath, Color.White.copy(alpha = dAlpha), style = Stroke(2.dp.toPx()))
+                    }
                 }
 
-                if (gameStatus == "PLAYING" || gameStatus == "WON" || (gameStatus == "LOST" && destructionProgress.value < 1f)) {
-                    val dAlpha = if (gameStatus == "LOST") (1f - destructionProgress.value) else 1f
-                    val dExpand = if (gameStatus == "LOST") destructionProgress.value * 100f else 0f
-                    rotate(shipLean, pivot = shipPos) {
-                        val shipPath = Path().apply {
-                            moveTo(shipPos.x, shipPos.y - 65f - dExpand); lineTo(shipPos.x - 45f - dExpand, shipPos.y + 40f + dExpand)
-                            lineTo(shipPos.x, shipPos.y + 15f); lineTo(shipPos.x + 45f + dExpand, shipPos.y + 40f + dExpand); close()
-                        }
-                        drawPath(shipPath, Color.White.copy(dAlpha), style = Stroke(2.5.dp.toPx()))
-                        drawCircle(Color.White.copy(0.2f * dAlpha), radius = 28f + dExpand, center = shipPos)
-                    }
-                }
-                bullets.forEach { b -> 
-                    if (b.isEnemy) {
-                        drawCircle(Color.White, radius = 12f, center = b.position)
-                        drawCircle(Color.White.copy(0.4f), radius = 24f, center = b.position)
-                    } else { drawRect(Color.White, b.position - Offset(2.5f, 25f), Size(5f, 50f)) }
-                }
-                particles.forEach { p -> drawCircle(p.color.copy(alpha = min(1f, p.life)), radius = p.size * p.life, center = p.pos) }
+                bullets.forEach { b -> if (b.isEnemy) drawCircle(Color.White, 10f, b.position) else drawRect(Color.White, b.position-Offset(2.5f,15f), Size(5f, 30f)) }
+                particles.forEach { p -> drawCircle(p.color.copy(alpha = p.life), radius = 3f, center = p.pos) }
             }
-
-            // HUD TELEMETRY
-            Column(modifier = Modifier.padding(24.dp).align(Alignment.TopEnd), horizontalAlignment = Alignment.End) {
-                val totalMs = gameTime
-                val centis = (totalMs % 1000) / 10
-                val secs = (totalMs / 1000) % 60
-                val mins = (totalMs / 60000)
-                Text(text = "T+ ${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${centis.toString().padStart(2, '0')}", color = Color.White, style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp))
+            // HUD
+            Column(modifier = Modifier.padding(24.dp).align(Alignment.TopStart)) {
+                Text("AXION COMBAT", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black, letterSpacing = 4.sp)
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("⌖ ", color = Color.White, fontSize = 12.sp)
-                    Text(text = "${shipPos.x.toInt().toString().padStart(4, '0')} : ${shipPos.y.toInt().toString().padStart(4, '0')}", color = Color.White.copy(0.5f), fontSize = 9.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Light)
+                    Text("ORB: ", color = Color.White.copy(0.7f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Box(modifier = Modifier.width(160.dp).height(8.dp).background(Color.White.copy(0.1f))) { Box(modifier = Modifier.fillMaxHeight().fillMaxWidth(animH).background(Color.White)) }
+                    Text("  ${bossHealth.toInt()}/2500", color = Color.White.copy(0.6f), fontSize = 10.sp, fontWeight = FontWeight.Medium)
                 }
+                Spacer(Modifier.height(24.dp))
+                logs.forEach { Text(it.message, color = Color.White.copy(0.8f), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp) }
             }
-
-            Column(modifier = Modifier.padding(24.dp).align(Alignment.TopStart)) {
-                Text("AXION COMBAT", color = Color.White, style = TextStyle(letterSpacing = 8.sp, fontWeight = FontWeight.Black, fontSize = 14.sp))
-                Spacer(Modifier.height(10.dp))
+            Column(modifier = Modifier.padding(24.dp).align(Alignment.TopEnd), horizontalAlignment = Alignment.End) {
+                val ms = (gameTime/10 % 100); val s = (gameTime/1000 % 60); val m = (gameTime/60000)
+                Text(text = "T+ ${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}:${ms.toString().padStart(2,'0')}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("ORB", color = Color.White.copy(0.6f), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 12.dp))
-                    Box(modifier = Modifier.width(220.dp).height(10.dp).background(Color.White.copy(0.1f))) {
-                        Box(modifier = Modifier.fillMaxHeight().fillMaxWidth(animatedHealth).background(Color.White))
-                    }
-                }
-            }
-
-            if (gameStatus == "PLAYING") {
-                Text("TOUCH TO MOVE • TAP OTHER FINGER TO FIRE", modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 60.dp), color = Color.White.copy(0.3f), fontSize = 10.sp, letterSpacing = 2.sp)
-            }
-            
-            if (gameStatus != "PLAYING") {
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.96f))) {
-                    Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = if (gameStatus == "WON") "PURITY RESTORED" else "INTEGRITY BREACH", color = Color.White, style = TextStyle(fontSize = 32.sp, fontWeight = FontWeight.ExtraLight, letterSpacing = 12.sp, textAlign = TextAlign.Center))
-                        Spacer(Modifier.height(8.dp))
-                        Text(text = if (gameStatus == "WON") "EXTERNAL INFLUENCE NEUTRALIZED" else "SYSTEM PURITY COMPROMISED", color = Color.White.copy(0.4f), fontSize = 12.sp, letterSpacing = 3.sp)
-                        
-                        Spacer(Modifier.height(32.dp))
-                        
-                        // LIFETIME INTELLIGENCE
-                        Row(modifier = Modifier.width(300.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("TOTAL PURGES", color = Color.White.copy(0.3f), fontSize = 9.sp, letterSpacing = 2.sp)
-                                Text("${statsManager.getLifetimeWins()}", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Light)
-                            }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                val rate = if (statsManager.getLifetimeGames() > 0) (statsManager.getLifetimeWins() * 100 / statsManager.getLifetimeGames()) else 0
-                                Text("SUCCESS RATE", color = Color.White.copy(0.3f), fontSize = 9.sp, letterSpacing = 2.sp)
-                                Text("$rate%", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Light)
-                            }
-                        }
-
-                        Spacer(Modifier.height(32.dp))
-                        Text("MISSION LOG // RECENT OPERATIONS", color = Color.White.copy(0.3f), fontSize = 10.sp, letterSpacing = 4.sp)
-                        Spacer(Modifier.height(16.dp))
-                        
-                        Box(modifier = Modifier.height(180.dp).width(320.dp)) {
-                            val history = statsManager.getHistory()
-                            LazyColumn(horizontalAlignment = Alignment.CenterHorizontally) {
-                                items(history) { stat ->
-                                    val date = SimpleDateFormat("MMM dd HH:mm", Locale.US).format(Date(stat.timestamp))
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(text = date, color = Color.White.copy(0.4f), fontSize = 10.sp, modifier = Modifier.width(80.dp))
-                                        Text(
-                                            text = if (stat.result == "WON") "PURGED" else "FAILED",
-                                            color = if (stat.result == "WON") Color.White else Color.Gray,
-                                            fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(60.dp)
-                                        )
-                                        Text(text = "${stat.accuracy}% ACC", color = Color.White.copy(0.5f), fontSize = 9.sp, modifier = Modifier.width(50.dp))
-                                        Text(text = stat.time, color = Color.White.copy(0.7f), fontSize = 10.sp, textAlign = TextAlign.End, modifier = Modifier.width(60.dp))
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    Text("⌖ ", color = Color.White, fontSize = 12.sp)
+                    Text(text = "X:${shipPos.x.toInt()} Y:${shipPos.y.toInt()}", color = Color.White.copy(0.5f), fontSize = 9.sp, letterSpacing = 1.sp)
                 }
             }
         }
@@ -399,74 +358,98 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
 }
 
 @Composable
-fun AtomCrashGame(onFinish: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    val haptic = LocalHapticFeedback.current
-    var remainingAtoms by remember { mutableIntStateOf(5) }
-    var isExploding by remember { mutableStateOf(false) }
-    var showFinalText by remember { mutableStateOf(false) }
-    val crashProgress = remember { Animatable(0f) }
-    val explosionProgress = remember { Animatable(0f) }
-    val flashAlpha = remember { Animatable(0f) }
-    val nucleusShake = remember { Animatable(0f) }
-    val nucleusScale = remember { Animatable(1f) }
-    val rotation by rememberInfiniteTransition().animateFloat(0f, 360f, infiniteRepeatable(tween(7000, easing = LinearEasing)))
-
-    Box(modifier = Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-        if (remainingAtoms > 0 && !crashProgress.isRunning && !isExploding) {
-            scope.launch {
-                launch { haptic.performHapticFeedback(HapticFeedbackType.LongPress); nucleusScale.animateTo(1.25f, tween(60)); nucleusScale.animateTo(1f, spring(Spring.DampingRatioMediumBouncy)) }
-                launch { repeat(3) { nucleusShake.animateTo(8f, tween(30)); nucleusShake.animateTo(-8f, tween(30)) }; nucleusShake.animateTo(0f, tween(30)) }
-                crashProgress.animateTo(1f, tween(250, easing = BackEaseIn))
-                remainingAtoms--
-                if (remainingAtoms == 0) {
-                    isExploding = true
-                    launch { flashAlpha.animateTo(0.5f, tween(40)); flashAlpha.animateTo(0f, tween(1200)) }
-                    explosionProgress.animateTo(1f, tween(1500, easing = ExpoOut))
-                    showFinalText = true
-                    delay(3500); onFinish()
-                }
-                crashProgress.snapTo(0f)
+fun SummaryScreen(statsManager: StatsManager, onExit: () -> Unit) {
+    val lastStat = statsManager.history.firstOrNull()
+    val isWin = lastStat?.result == "WON"
+    val lastTime = lastStat?.time ?: "00:00:00"
+    
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 24.dp)) {
+            Text(
+                text = if (isWin) "PURITY RESTORED" else "INTEGRITY BREACHED", 
+                color = Color.White, 
+                style = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.ExtraLight, letterSpacing = if (isWin) 12.sp else 8.sp, textAlign = TextAlign.Center)
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = if (isWin) "EXTERNAL INFLUENCE NEUTRALIZED" else "SYSTEM PURITY COMPROMISED",
+                color = Color.White.copy(0.4f),
+                style = TextStyle(fontSize = 10.sp, letterSpacing = 4.sp, fontWeight = FontWeight.Medium)
+            )
+            Spacer(Modifier.height(60.dp))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("MISSION TIME", color = Color.White.copy(0.3f), fontSize = 10.sp, letterSpacing = 4.sp)
+                Text(lastTime, color = Color.White, fontSize = 56.sp, fontWeight = FontWeight.Thin)
             }
-        }
-    }, contentAlignment = Alignment.Center) {
-        Canvas(modifier = Modifier.size(450.dp).graphicsLayer { translationX = nucleusShake.value }) {
-            val centerX = size.width / 2; val centerY = size.height / 2
-            if (!showFinalText || isExploding) {
-                val alpha = (1f - explosionProgress.value).coerceAtLeast(0f)
-                if (alpha > 0f) {
-                    for (i in 0 until 3) drawOvalOrbit(centerX, centerY, size.minDimension/2.8f, size.minDimension/2.8f*0.45f, i*60f, Color.White.copy(0.12f*alpha), 1.dp.toPx())
-                }
-                if (isExploding) drawCircle(Color.White.copy(0.4f*alpha), radius = explosionProgress.value * size.maxDimension, center = Offset(centerX, centerY), style = Stroke(1.dp.toPx()))
-                val nRadius = (26.dp.toPx() * nucleusScale.value) + (if (isExploding) explosionProgress.value * 380.dp.toPx() else 0f)
-                if (alpha > 0f) {
-                    drawCircle(Color.White.copy(alpha), radius = nRadius, center = Offset(centerX, centerY))
-                    drawCircle(Color.Black.copy(alpha), radius = nRadius*0.88f, center = Offset(centerX, centerY))
-                    drawCircle(Color.White.copy(alpha*0.8f), radius = nRadius*0.35f, center = Offset(centerX, centerY))
-                }
-                if (!isExploding) {
-                    val tilts = listOf(0f, 60f, 120f, 0f, 60f); val angles = listOf(0f, 72f, 144f, 216f, 288f)
-                    for (i in 0 until remainingAtoms) {
-                        drawElectronOnOrbit(centerX, centerY, size.minDimension/2.8f, size.minDimension/2.8f*0.45f, tilts[i], rotation+angles[i], 8.dp.toPx(), Color.White, if (i == remainingAtoms-1 && crashProgress.value > 0f) crashProgress.value else 0f)
+            Spacer(Modifier.height(60.dp))
+            Text("TACTICAL DATA // MISSION_LOG", color = Color.White.copy(0.2f), fontSize = 9.sp, letterSpacing = 6.sp)
+            Spacer(Modifier.height(20.dp))
+            Box(modifier = Modifier.height(180.dp).fillMaxWidth().padding(horizontal = 16.dp)) {
+                LazyColumn {
+                    items(statsManager.history) { stat ->
+                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(SimpleDateFormat("HH:mm", Locale.US).format(Date(stat.timestamp)), color = Color.White.copy(0.3f), fontSize = 10.sp, modifier = Modifier.width(60.dp))
+                            Text(text = if (stat.result == "WON") "PURGED" else "FAILED", color = if (stat.result == "WON") Color.White else Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.width(80.dp))
+                            Text(text = stat.time, color = Color.White.copy(0.6f), fontSize = 10.sp, modifier = Modifier.width(70.dp))
+                            Text("${stat.accuracy}% ACC", color = Color.White.copy(0.4f), fontSize = 10.sp, textAlign = TextAlign.End, modifier = Modifier.width(60.dp))
+                        }
                     }
                 }
             }
+            Spacer(Modifier.height(48.dp))
+            Text(text = "TAP TO RE-INITIALIZE", modifier = Modifier.clickable { onExit() }, style = TextStyle(fontSize = 11.sp, color = Color.White.copy(0.4f), letterSpacing = 4.sp, fontWeight = FontWeight.Bold))
         }
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = flashAlpha.value)))
-        
-        AnimatedVisibility(visible = showFinalText, enter = fadeIn(tween(1800)) + scaleIn(tween(1800, easing = ExpoOut))) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 40.dp)) {
-                Text(text = "AXION", style = TextStyle(fontSize = 52.sp, fontWeight = FontWeight.Thin, letterSpacing = 20.sp, color = Color.White), textAlign = TextAlign.Center)
-                Spacer(Modifier.height(12.dp))
-                Text(text = "OPERATING SYSTEM", style = TextStyle(fontSize = 12.sp, color = Color.White.copy(0.5f), letterSpacing = 12.sp, fontWeight = FontWeight.Bold), textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+private fun DamageKeyRow(color: Color, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 5.dp).width(200.dp)) {
+        Box(modifier = Modifier.size(12.dp).background(color)); Spacer(Modifier.width(20.dp))
+        Text(text = text, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp)
+    }
+}
+
+@Composable
+fun AtomCrashGame(onFinish: () -> Unit) {
+    val haptic = LocalHapticFeedback.current; val scope = rememberCoroutineScope()
+    var remainingAtoms by remember { mutableIntStateOf(5) }
+    var isExploding by remember { mutableStateOf(false) }
+    val nScale = remember { Animatable(1f) }; val nShake = remember { Animatable(0f) }
+    val boom = remember { Animatable(0f) }
+    val rotation by rememberInfiniteTransition().animateFloat(0f, 360f, infiniteRepeatable(tween(7000, easing = LinearEasing)))
+
+    Box(modifier = Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+        if (remainingAtoms > 0 && !isExploding) {
+            scope.launch {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                launch { nScale.animateTo(1.3f, tween(60)); nScale.animateTo(1f, spring(Spring.DampingRatioMediumBouncy)) }
+                launch { repeat(4) { nShake.animateTo(15f, tween(30)); nShake.animateTo(-15f, tween(30)) }; nShake.animateTo(0f, tween(30)) }
+            }
+            remainingAtoms--
+            if (remainingAtoms == 0) { isExploding = true; scope.launch { boom.animateTo(1f, tween(1000, easing = ExpoOut)); onFinish() } }
+        }
+    }, contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.size(450.dp).graphicsLayer { translationX = nShake.value }) {
+            val center = Offset(size.width / 2, size.height / 2)
+            if (boom.value < 1f) {
+                val alpha = (1f - boom.value)
+                drawCircle(Color.White.copy(alpha), radius = 60.dp.toPx() * nScale.value, center = center, style = Stroke(2.dp.toPx()))
+                drawCircle(Color.Black.copy(alpha), radius = 58.dp.toPx() * nScale.value, center = center)
+                drawCircle(Color.White.copy(0.6f * alpha), radius = 25.dp.toPx() * nScale.value, center = center, style = Stroke(1.dp.toPx()))
+                if (isExploding) drawCircle(Color.White.copy(0.5f * alpha), radius = boom.value * size.maxDimension, center = center, style = Stroke(2.dp.toPx()))
+                for (i in 0 until 3) rotate(i * 60f, pivot = center) { drawOval(Color.White.copy(0.12f * alpha), center - Offset(size.width/2.8f, size.width/7f), Size(size.width/1.4f, size.width/3.5f), style = Stroke(1.dp.toPx())) }
+                val angles = listOf(0f, 72f, 144f, 216f, 288f)
+                if (!isExploding) for (i in 0 until remainingAtoms) {
+                    val rad = Math.toRadians((rotation + angles[i]).toDouble())
+                    val x = center.x + cos(rad).toFloat() * 150.dp.toPx(); val y = center.y + sin(rad).toFloat() * 60.dp.toPx()
+                    drawCircle(Color.White, radius = 8.dp.toPx(), center = Offset(x, y))
+                }
             }
         }
     }
 }
 
-private fun DrawScope.drawOvalOrbit(cX: Float, cY: Float, rX: Float, rY: Float, tilt: Float, color: Color, stroke: Float) {
-    rotate(degrees = tilt, pivot = Offset(cX, cY)) { drawOval(color, Offset(cX - rX, cY - rY), Size(rX * 2, rY * 2), style = Stroke(stroke)) }
-}
 private fun DrawScope.drawElectronOnOrbit(cX: Float, cY: Float, rX: Float, rY: Float, tilt: Float, angle: Float, radius: Float, color: Color, crashProgress: Float) {
     val rad = Math.toRadians(angle.toDouble()); val tiltRad = Math.toRadians(tilt.toDouble())
     val x = rX * cos(rad).toFloat(); val y = rY * sin(rad).toFloat()
@@ -475,5 +458,4 @@ private fun DrawScope.drawElectronOnOrbit(cX: Float, cY: Float, rX: Float, rY: F
     val eX = cX + (rotX * (1f - crashProgress)); val eY = cY + (rotY * (1f - crashProgress))
     drawCircle(Color.White.copy(0.15f), radius = radius * 3f, center = Offset(eX, eY))
     drawCircle(color, radius, center = Offset(eX, eY), style = Stroke(1.5.dp.toPx()))
-    drawCircle(Color.White, radius = radius * 0.4f, center = Offset(eX, eY))
 }
