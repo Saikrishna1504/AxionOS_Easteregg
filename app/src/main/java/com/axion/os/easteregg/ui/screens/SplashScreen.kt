@@ -19,7 +19,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun SplashScreen(onFinish: () -> Unit) {
     var currentWordIndex by remember { mutableIntStateOf(0) }
-    val words = listOf("more faster.", "more powerful.", "more reliable.", "more axion.")
+    val words = listOf("faster.", "more powerful.", "more reliable.", "more axion.")
     
     LaunchedEffect(Unit) {
         delay(1500); currentWordIndex = 1
