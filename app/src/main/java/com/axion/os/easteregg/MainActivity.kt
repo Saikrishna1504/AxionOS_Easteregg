@@ -9,6 +9,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -45,6 +46,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.lerp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -133,15 +135,25 @@ fun MainContainer() {
     var gameState by remember { mutableStateOf("SPLASH") }
     val context = LocalContext.current
     val statsManager = remember { StatsManager(context) }
-    val stars = remember { List(100) { Star(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 1.5f + 0.5f, Random.nextFloat() * 0.08f + 0.02f, Random.nextFloat() * 0.3f + 0.1f) } }
-    val starOffset by rememberInfiniteTransition().animateFloat(0f, 1f, infiniteRepeatable(tween(10000, easing = LinearEasing)))
+    
+    // Reduced Parallax Layers
+    val layer1 = remember { List(30) { Star(Random.nextFloat(), Random.nextFloat(), 0.8f, 0.05f, 0.15f) } }
+    val layer2 = remember { List(15) { Star(Random.nextFloat(), Random.nextFloat(), 1.2f, 0.12f, 0.35f) } }
+    val layer3 = remember { List(8) { Star(Random.nextFloat(), Random.nextFloat(), 2.0f, 0.25f, 0.6f) } }
+    
+    val starOffset by rememberInfiniteTransition().animateFloat(0f, 1f, infiniteRepeatable(tween(8000, easing = LinearEasing)))
     
     Box(modifier = Modifier.fillMaxSize().background(Color.Black).systemBarsPadding()) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            stars.forEach { star ->
-                val currentY = (star.y + starOffset * star.speed * 15f) % 1f
-                drawCircle(Color.White.copy(alpha = star.alpha), radius = star.size, center = Offset(star.x * size.width, currentY * size.height))
+            val drawLayer = { stars: List<Star>, speedMult: Float ->
+                stars.forEach { star ->
+                    val currentY = (star.y + starOffset * star.speed * speedMult) % 1f
+                    drawCircle(Color.White.copy(alpha = star.alpha), radius = star.size, center = Offset(star.x * size.width, currentY * size.height))
+                }
             }
+            drawLayer(layer1, 10f)
+            drawLayer(layer2, 15f)
+            drawLayer(layer3, 25f)
         }
 
         Crossfade(targetState = gameState, animationSpec = tween(1000), label = "state") { state ->
@@ -162,24 +174,40 @@ fun CombatPrepScreen(onStart: () -> Unit) {
     val fullText1 = "SYNCING FLIGHT COURSE..."
     val fullText2 = "AXION COURSE PREPARED"
     
-    val verticalBias = remember { Animatable(0f) } // 0 is center, -0.4 is towards top
+    val verticalBias = remember { Animatable(0f) }
+    val shipYOffset = remember { Animatable(500f) } 
+    val shipAlpha = remember { Animatable(0f) }
+    
+    val infiniteTransition = rememberInfiniteTransition()
+    val thrusterScale by infiniteTransition.animateFloat(
+        initialValue = 0.8f,
+        targetValue = 1.4f,
+        animationSpec = infiniteRepeatable(tween(60, easing = LinearEasing), RepeatMode.Reverse),
+        label = "thruster"
+    )
 
     LaunchedEffect(Unit) {
-        // Phase 1: Type text 1 at center
         while (text1Chars < fullText1.length) {
             delay(80)
             text1Chars++
         }
+        delay(800)
+        
+        verticalBias.animateTo(-0.4f, tween(1000, easing = FastOutSlowInEasing))
         delay(600)
         
-        // Phase 2: Move text 1 up
-        verticalBias.animateTo(-0.4f, tween(1000, easing = FastOutSlowInEasing))
-        delay(400)
-        
-        // Phase 3: Type text 2 below
         while (text2Chars < fullText2.length) {
             delay(60)
             text2Chars++
+        }
+        delay(800)
+
+        launch { shipAlpha.animateTo(1f, tween(1000)) }
+        shipYOffset.animateTo(0f, tween(1500, easing = LinearOutSlowInEasing))
+        
+        while(true) {
+            shipYOffset.animateTo(-15f, tween(2000, easing = FastOutSlowInEasing))
+            shipYOffset.animateTo(0f, tween(2000, easing = FastOutSlowInEasing))
         }
     }
 
@@ -207,6 +235,73 @@ fun CombatPrepScreen(onStart: () -> Unit) {
                     style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, color = Color.White, fontFamily = FontFamily.Monospace),
                     textAlign = TextAlign.Center
                 )
+                
+                if (text2Chars >= fullText2.length) {
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = "[ SYSTEM_NOTE: DO NOT TAP 5 TIMES OVER \"AXION COMBAT\" ]",
+                        style = TextStyle(fontSize = 10.sp, color = Color.White.copy(0.25f), fontFamily = FontFamily.Monospace, letterSpacing = 1.sp),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+
+        // IMPROVED INTERCEPTOR SHIP
+        Box(modifier = Modifier
+            .align(Alignment.Center)
+            .offset(y = 220.dp + shipYOffset.value.dp)
+            .graphicsLayer { alpha = shipAlpha.value }
+            .size(120.dp)
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+                
+                // Thruster Flame Animation
+                val flamePath = Path().apply {
+                    moveTo(w * 0.45f, h * 0.8f)
+                    lineTo(w * 0.5f, h * (0.8f + 0.25f * thrusterScale))
+                    lineTo(w * 0.55f, h * 0.8f)
+                    close()
+                }
+                drawPath(flamePath, Color.White.copy(0.6f))
+                drawCircle(Color.White.copy(0.3f), radius = 12.dp.toPx() * thrusterScale, center = Offset(w * 0.5f, h * 0.82f))
+
+                // Heavy Interceptor Hull
+                val bodyPath = Path().apply {
+                    moveTo(w * 0.5f, h * 0.1f)   // Nose tip
+                    lineTo(w * 0.58f, h * 0.35f) // Right nose
+                    lineTo(w * 0.85f, h * 0.65f) // Right wing top
+                    lineTo(w * 0.92f, h * 0.85f) // Right wing tip
+                    lineTo(w * 0.72f, h * 0.85f) // Right wing base
+                    lineTo(w * 0.62f, h * 0.72f) // Right engine intake
+                    lineTo(w * 0.5f, h * 0.8f)   // Rear thruster port
+                    lineTo(w * 0.38f, h * 0.72f) // Left engine intake
+                    lineTo(w * 0.28f, h * 0.85f) // Left wing base
+                    lineTo(w * 0.08f, h * 0.85f) // Left wing tip
+                    lineTo(w * 0.15f, h * 0.65f) // Left wing top
+                    lineTo(w * 0.42f, h * 0.35f) // Left nose
+                    close()
+                }
+                
+                // Main Structure
+                drawPath(bodyPath, Color.White, style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                
+                // Hull Reinforcements / Details
+                drawLine(Color.White.copy(0.5f), Offset(w * 0.5f, h * 0.2f), Offset(w * 0.5f, h * 0.5f), strokeWidth = 1.dp.toPx())
+                drawLine(Color.White.copy(0.4f), Offset(w * 0.4f, h * 0.5f), Offset(w * 0.6f, h * 0.5f), strokeWidth = 1.dp.toPx())
+                
+                // Cockpit
+                val cockpit = Path().apply {
+                    moveTo(w * 0.46f, h * 0.38f)
+                    lineTo(w * 0.54f, h * 0.38f)
+                    lineTo(w * 0.52f, h * 0.5f)
+                    lineTo(w * 0.48f, h * 0.5f)
+                    close()
+                }
+                drawPath(cockpit, Color.White.copy(0.2f))
+                drawPath(cockpit, Color.White, style = Stroke(1.dp.toPx()))
             }
         }
 
@@ -223,7 +318,7 @@ fun CombatPrepScreen(onStart: () -> Unit) {
 @Composable
 fun SplashScreen(onFinish: () -> Unit) {
     var currentWordIndex by remember { mutableIntStateOf(0) }
-    val animatedWords = listOf("faster.", "more powerful.", "more reliable.", "axion.")
+    val animatedWords = listOf("more faster.", "more powerful.", "more reliable.", "more axion.")
     
     LaunchedEffect(Unit) {
         delay(1500)
@@ -245,20 +340,21 @@ fun SplashScreen(onFinish: () -> Unit) {
 
             Spacer(Modifier.height(16.dp))
 
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(24.dp)) {
-                Text("Make your android ", style = TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = Color.White.copy(0.6f)))
-                
-                AnimatedContent(
-                    targetState = currentWordIndex,
-                    transitionSpec = {
-                        (slideInVertically { height -> height } + fadeIn(tween(600))).togetherWith(
-                            slideOutVertically { height -> -height } + fadeOut(tween(600))
-                        )
-                    },
-                    label = "word_carousel"
-                ) { index ->
-                    val textColor = if (index == 3) Color.White else Color.White.copy(0.6f)
-                    Text(text = animatedWords[index], style = TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = textColor))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(24.dp)) {
+                    Text("Make your android ", style = TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = Color.White.copy(0.6f)))
+                    
+                    AnimatedContent(
+                        targetState = currentWordIndex,
+                        transitionSpec = {
+                            (slideInVertically { height -> height } + fadeIn(tween(600))).togetherWith(
+                                slideOutVertically { height -> -height } + fadeOut(tween(600))
+                            )
+                        },
+                        label = "word_carousel"
+                    ) { index ->
+                        Text(text = animatedWords[index], style = TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = if (index == 3) Color.White else Color.White.copy(0.6f)))
+                    }
                 }
             }
         }
@@ -283,7 +379,7 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
         var bossPos by remember { mutableStateOf(Offset(screenWidth / 2, screenHeight * 0.18f)) }
         var bossPhase by remember { mutableFloatStateOf(0f) } 
         
-        var bossHealth by remember { mutableFloatStateOf(100f) }
+        var bossHealth by remember { mutableFloatStateOf(2026f) }
         var bossHitFlash by remember { mutableFloatStateOf(0f) } 
         
         var gameStatus by remember { mutableStateOf("PLAYING") } 
@@ -311,19 +407,32 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
         val destructionProgress = remember { Animatable(0f) }
         val screenShake = remember { Animatable(0f) }
         
+        val infiniteTransition = rememberInfiniteTransition()
+        val thrusterScale by infiniteTransition.animateFloat(
+            initialValue = 0.8f,
+            targetValue = 1.4f,
+            animationSpec = infiniteRepeatable(tween(60, easing = LinearEasing), RepeatMode.Reverse),
+            label = "thruster"
+        )
+        
         var bulletsFired by remember { mutableIntStateOf(0) }
         var hitsConfirmed by remember { mutableIntStateOf(0) }
         val accuracy = derivedStateOf { if (bulletsFired > 0) ((hitsConfirmed.toFloat() / bulletsFired) * 100).toInt() else 0 }
 
-        val animatedHealth by animateFloatAsState(targetValue = bossHealth / 100f, animationSpec = spring(stiffness = Spring.StiffnessLow), label = "health")
+        val animatedHealth by animateFloatAsState(targetValue = bossHealth / 2026f, animationSpec = spring(stiffness = Spring.StiffnessLow), label = "health")
         
         val envColor by animateColorAsState(
-            targetValue = if (bossHealth in 1f..25f) Color.Gray else Color.White,
+            targetValue = if (bossHealth < 500f) Color.Gray else Color.White,
             animationSpec = tween(1500), label = "env_color"
         )
 
+        var targetBossPos by remember { mutableStateOf(Offset(screenWidth / 2, screenHeight * 0.2f)) }
+        var bossVelocity by remember { mutableStateOf(Offset.Zero) }
+
         LaunchedEffect(Unit) {
             var lastBossShot = 0L
+            var lastTargetChange = 0L
+            
             while(gameStatus == "PLAYING") {
                 withFrameMillis { frameTime ->
                     if (lastFrameTime == -1L) lastFrameTime = frameTime
@@ -333,6 +442,33 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
                     
                     if (bossHitFlash > 0f) bossHitFlash = max(0f, bossHitFlash - 0.1f)
                     if (fireFlash > 0f) fireFlash = max(0f, fireFlash - 0.15f)
+
+                    // Smooth Horizontal Sine Movement
+                    val targetSpeed = when {
+                        bossHealth > 1500f -> 1.3f  
+                        bossHealth > 1000f -> 1.7f
+                        bossHealth > 500f -> 2.2f
+                        else -> 2.8f              
+                    }
+                    bossPhase += (deltaMs / 1000f) * targetSpeed
+
+                    bossPos = Offset(
+                        x = (screenWidth / 2) + sin(bossPhase) * (screenWidth * 0.35f),
+                        y = (screenHeight * 0.18f) + sin(bossPhase * 2.1f) * 15f 
+                    )
+
+                    // Hull Collision Detection
+                    if ((shipPos - bossPos).getDistance() < 160f) { 
+                         gameStatus = "LOST"
+                         launch { 
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            launch { 
+                                repeat(6) { screenShake.animateTo((15..25).random().toFloat(), tween(30)); screenShake.animateTo(-(15..25).random().toFloat(), tween(30)) }
+                                screenShake.animateTo(0f)
+                            }
+                            destructionProgress.animateTo(1f, tween(1000, easing = LinearOutSlowInEasing))
+                        }
+                    }
 
                     if (gameTime % 2L == 0L) {
                         val spread = if (isMoving) 15f else 5f
@@ -346,35 +482,28 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
                             w.x = Random.nextFloat() * screenWidth
                         }
                     }
-                    
-                    val targetSpeed = when {
-                        bossHealth > 75f -> 1.3f  
-                        bossHealth > 50f -> 1.7f
-                        bossHealth > 25f -> 2.2f
-                        else -> 2.8f              
-                    }
-
-                    bossPhase += (deltaMs / 1000f) * targetSpeed
-
-                    bossPos = Offset(
-                        x = (screenWidth / 2) + sin(bossPhase) * (screenWidth * 0.35f),
-                        y = (screenHeight * 0.18f) + sin(bossPhase * 2.1f) * 15f 
-                    )
 
                     val fireDelay = when {
-                        bossHealth > 75f -> 1600L 
-                        bossHealth > 50f -> 1400L 
-                        bossHealth > 25f -> 1200L  
+                        bossHealth > 1500f -> 1600L 
+                        bossHealth > 1000f -> 1400L 
+                        bossHealth > 500f -> 1200L  
                         else -> 1300L 
                     }
 
                     if (gameTime - lastBossShot > fireDelay) {
-                        if (bossHealth <= 25f) {
-                            bullets.add(Bullet(bossPos + Offset(0f, 100f), isEnemy = true, velocityX = 0f))
-                            bullets.add(Bullet(bossPos + Offset(-20f, 100f), isEnemy = true, velocityX = -4f)) 
-                            bullets.add(Bullet(bossPos + Offset(20f, 100f), isEnemy = true, velocityX = 4f))
-                        } else {
-                            bullets.add(Bullet(bossPos + Offset(0f, 100f), isEnemy = true, velocityX = 0f))
+                        when {
+                            bossHealth <= 1000f -> { 
+                                bullets.add(Bullet(bossPos + Offset(0f, 100f), isEnemy = true, velocityX = 0f))
+                                bullets.add(Bullet(bossPos + Offset(-30f, 100f), isEnemy = true, velocityX = -5f)) 
+                                bullets.add(Bullet(bossPos + Offset(30f, 100f), isEnemy = true, velocityX = 5f))
+                            }
+                            bossHealth <= 1500f -> { 
+                                bullets.add(Bullet(bossPos + Offset(-20f, 100f), isEnemy = true, velocityX = -3f))
+                                bullets.add(Bullet(bossPos + Offset(20f, 100f), isEnemy = true, velocityX = 3f))
+                            }
+                            else -> {
+                                bullets.add(Bullet(bossPos + Offset(0f, 100f), isEnemy = true, velocityX = 0f))
+                            }
                         }
                         lastBossShot = gameTime
                     }
@@ -397,13 +526,14 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
                             }
                         } else {
                             b.position = Offset(b.position.x, b.position.y - 48f)
-                            if ((b.position - bossPos).getDistance() < 70f) {
-                                bossHealth -= 3f
+                            if ((b.position - bossPos).getDistance() < 130f) {
+                                val damageAmount = if (overdriveMode) 100f else 25f
+                                bossHealth = (bossHealth - damageAmount).coerceAtLeast(0f)
                                 hitsConfirmed++
                                 bossHitFlash = 1f 
                                 shockwaves.add(Shockwave(radius = 60f, alpha = 0.8f, pos = b.position)) 
                                 
-                                damageTexts.add(DamageText("-0x03", bossPos + Offset(Random.nextFloat() * 60 - 30, Random.nextFloat() * 20 - 40), 1f))
+                                damageTexts.add(DamageText("-${damageAmount.toInt()}", bossPos + Offset(Random.nextFloat() * 80 - 40, Random.nextFloat() * 40 - 60), 1f))
                                 
                                 bIterator.remove()
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) 
@@ -497,16 +627,6 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
                 val parallaxX = (screenWidth / 2 - shipPos.x) * 0.04f
                 val parallaxY = (screenHeight / 2 - shipPos.y) * 0.04f
                 
-                translate(left = parallaxX, top = parallaxY) {
-                    val gridSpacing = 60f
-                    val gridAlpha = if (bossHealth <= 25f) 0.25f else 0.15f
-                    for (x in -100..size.width.toInt()+100 step gridSpacing.toInt()) {
-                        for (y in -100..size.height.toInt()+100 step gridSpacing.toInt()) {
-                            drawCircle(color = envColor.copy(gridAlpha), radius = 2f, center = Offset(x.toFloat(), y.toFloat()))
-                        }
-                    }
-                }
-
                 if (gameStatus == "PLAYING" || gameStatus == "WON") {
                     val streamColor = envColor.copy(alpha = 0.1f)
                     warpLines.forEach { w ->
@@ -522,39 +642,29 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
                 if (gameStatus == "PLAYING" || gameStatus == "LOST" || (gameStatus == "WON" && destructionProgress.value < 1f)) {
                     val dAlpha = if (gameStatus == "WON") (1f - destructionProgress.value) else 1f
                     val dScale = if (gameStatus == "WON") (1f + destructionProgress.value * 0.5f) else 1f
-                    val r = 50f * dScale
+                    val baseR = 120f * dScale
+                    val pulse = if (gameStatus == "PLAYING") sin(gameTime / 180f) * 0.1f else 0f
                     
                     if (bossHitFlash > 0f) {
-                        val glitchOffset = Offset((Random.nextFloat() - 0.5f) * 15f, (Random.nextFloat() - 0.5f) * 15f)
-                        drawCircle(Color.White.copy(alpha = 0.4f * bossHitFlash * dAlpha), radius = r, center = bossPos + glitchOffset, style = Stroke(4f))
-                        drawCircle(Color.White.copy(alpha = 0.4f * bossHitFlash * dAlpha), radius = r, center = bossPos - glitchOffset, style = Stroke(4f))
-                    }
-                    
-                    val bossPath = Path().apply { addOval(Rect(bossPos - Offset(r, r), Size(r * 2, r * 2))) }
-                    
-                    clipPath(bossPath) {
-                        drawRect(Color(0xFF888888).copy(alpha = dAlpha), topLeft = Offset(bossPos.x - r, bossPos.y - r), size = Size(r * 2, r * 2))
-                        drawRect(Color(0xFF666666).copy(alpha = dAlpha), topLeft = Offset(bossPos.x - r * 0.6f, bossPos.y - r), size = Size(r * 1.2f, r * 2))
-                        drawRect(Color(0xFF444444).copy(alpha = dAlpha), topLeft = Offset(bossPos.x - r * 0.2f, bossPos.y - r), size = Size(r * 0.4f, r * 2))
-                    }
-                    
-                    drawCircle(color = Color.White.copy(alpha = dAlpha), radius = r, center = bossPos, style = Stroke(3f))
-                    
-                    rotate(gameTime * 0.05f, bossPos) {
-                        val arcRadius = r + 10f
-                        drawArc(color = Color.Gray.copy(alpha = dAlpha), startAngle = 135f, sweepAngle = 90f, useCenter = false, topLeft = Offset(bossPos.x - arcRadius, bossPos.y - arcRadius), size = Size(arcRadius * 2, arcRadius * 2), style = Stroke(width = 4f, cap = StrokeCap.Round))
-                        drawArc(color = Color.Gray.copy(alpha = dAlpha), startAngle = -45f, sweepAngle = 90f, useCenter = false, topLeft = Offset(bossPos.x - arcRadius, bossPos.y - arcRadius), size = Size(arcRadius * 2, arcRadius * 2), style = Stroke(width = 4f, cap = StrokeCap.Round))
+                        val glitchOffset = Offset((Random.nextFloat() - 0.5f) * 20f, (Random.nextFloat() - 0.5f) * 20f)
+                        drawCircle(Color.White.copy(alpha = 0.3f * bossHitFlash * dAlpha), radius = baseR, center = bossPos + glitchOffset, style = Stroke(4f))
+                        drawCircle(Color.White.copy(alpha = 0.3f * bossHitFlash * dAlpha), radius = baseR, center = bossPos - glitchOffset, style = Stroke(4f))
                     }
 
-                    if (bossHitFlash > 0f) {
-                        drawCircle(color = Color.White.copy(alpha = bossHitFlash * dAlpha), radius = r + 15f, center = bossPos)
-                    }
-
-                    val textLayoutResult = textMeasurer.measure(text = "G", style = TextStyle(color = Color.White.copy(dAlpha), fontSize = 32.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace))
-                    drawText(textLayoutResult = textLayoutResult, topLeft = Offset(bossPos.x - textLayoutResult.size.width / 2, bossPos.y - textLayoutResult.size.height / 2))
+                    drawCircle(Color.White.copy(0.12f * dAlpha), radius = 260f * (1f + pulse) * dScale, center = bossPos)
+                    drawCircle(Color.White.copy(dAlpha), radius = baseR, center = bossPos, style = Stroke(3.dp.toPx()))
                     
-                    val coordsText = textMeasurer.measure(text = "X: ${bossPos.x.toInt().toString().padStart(4, '0')}\nY: ${bossPos.y.toInt().toString().padStart(4, '0')}", style = TextStyle(color = envColor.copy(0.4f * dAlpha), fontSize = 10.sp, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center))
-                    drawText(textLayoutResult = coordsText, topLeft = Offset(bossPos.x - coordsText.size.width / 2, bossPos.y - 120f))
+                    rotate(gameTime / 8f, pivot = bossPos) {
+                        val arcRadius = 135f * dScale
+                        drawArc(Color.White.copy(0.4f * dAlpha), 0f, 60f, false, bossPos - Offset(arcRadius, arcRadius), Size(arcRadius * 2, arcRadius * 2), style = Stroke(2.dp.toPx()))
+                        drawArc(Color.White.copy(0.4f * dAlpha), 180f, 60f, false, bossPos - Offset(arcRadius, arcRadius), Size(arcRadius * 2, arcRadius * 2), style = Stroke(2.dp.toPx()))
+                    }
+                    
+                    val gSize = 55f * dScale
+                    val gRect = Rect(bossPos.x - gSize, bossPos.y - gSize, bossPos.x + gSize, bossPos.y + gSize)
+                    drawArc(Color.White.copy(dAlpha), 35f, 290f, false, gRect.topLeft, gRect.size, style = Stroke(7.dp.toPx() * dAlpha.coerceAtLeast(0.1f)))
+                    // Small stylized bar for 'G'
+                    drawLine(Color.White.copy(dAlpha), Offset(bossPos.x + 15f * dScale, bossPos.y), Offset(bossPos.x + gSize, bossPos.y), strokeWidth = 7.dp.toPx())
                 }
 
                 // --- SHIP DRAWING ---
@@ -563,17 +673,53 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
                     val dExpand = if (gameStatus == "LOST") destructionProgress.value * 100f else 0f
                     
                     rotate(shipLean, pivot = shipPos) {
-                        val chevronPath = Path().apply {
-                            moveTo(shipPos.x, shipPos.y - 45f - dExpand) 
-                            lineTo(shipPos.x + 30f, shipPos.y + 20f + dExpand) 
-                            lineTo(shipPos.x, shipPos.y + 5f + dExpand) 
-                            lineTo(shipPos.x - 30f, shipPos.y + 20f + dExpand) 
-                            close()
-                        }
-                        drawPath(path = chevronPath, color = shipAccentColor.copy(dAlpha), style = Stroke(width = 4f, cap = StrokeCap.Round, join = StrokeJoin.Round))
-                        
-                        if (fireFlash > 0f) {
-                            drawCircle(color = thrusterColor.copy(alpha = fireFlash * dAlpha), radius = 12f * fireFlash, center = shipPos - Offset(0f, 45f))
+                        translate(left = shipPos.x - 48f, top = shipPos.y - 48f) {
+                            val w = 96f // 120dp * 0.8
+                            val h = 96f
+                            
+                            // Thruster Flame Animation
+                            val flamePath = Path().apply {
+                                moveTo(w * 0.45f, h * 0.8f + dExpand)
+                                lineTo(w * 0.5f, h * (0.8f + 0.25f * thrusterScale) + dExpand)
+                                lineTo(w * 0.55f, h * 0.8f + dExpand)
+                                close()
+                            }
+                            drawPath(flamePath, Color.White.copy(0.6f * dAlpha))
+                            drawCircle(Color.White.copy(0.3f * dAlpha), radius = 7.dp.toPx() * thrusterScale, center = Offset(w * 0.5f, h * 0.82f + dExpand))
+
+                            // Heavy Interceptor Hull
+                            val bodyPath = Path().apply {
+                                moveTo(w * 0.5f, h * 0.1f - dExpand)   // Nose tip
+                                lineTo(w * 0.58f, h * 0.35f) // Right nose
+                                lineTo(w * 0.85f, h * 0.65f + dExpand) // Right wing top
+                                lineTo(w * 0.92f, h * 0.85f + dExpand) // Right wing tip
+                                lineTo(w * 0.72f, h * 0.85f + dExpand) // Right wing base
+                                lineTo(w * 0.62f, h * 0.72f + dExpand) // Right engine intake
+                                lineTo(w * 0.5f, h * 0.8f + dExpand)   // Rear thruster port
+                                lineTo(w * 0.38f, h * 0.72f + dExpand) // Left engine intake
+                                lineTo(w * 0.28f, h * 0.85f + dExpand) // Left wing base
+                                lineTo(w * 0.08f, h * 0.85f + dExpand) // Left wing tip
+                                lineTo(w * 0.15f, h * 0.65f + dExpand) // Left wing top
+                                lineTo(w * 0.42f, h * 0.35f) // Left nose
+                                close()
+                            }
+                            
+                            // Main Structure
+                            drawPath(bodyPath, Color.White.copy(dAlpha), style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                            
+                            // Hull Details
+                            drawLine(Color.White.copy(0.5f * dAlpha), Offset(w * 0.5f, h * 0.2f), Offset(w * 0.5f, h * 0.5f), strokeWidth = 1.dp.toPx())
+                            
+                            // Cockpit
+                            val cockpit = Path().apply {
+                                moveTo(w * 0.46f, h * 0.38f)
+                                lineTo(w * 0.54f, h * 0.38f)
+                                lineTo(w * 0.52f, h * 0.5f)
+                                lineTo(w * 0.48f, h * 0.5f)
+                                close()
+                            }
+                            drawPath(cockpit, Color.White.copy(0.2f * dAlpha))
+                            drawPath(cockpit, Color.White.copy(dAlpha), style = Stroke(1.dp.toPx()))
                         }
                     }
                     
@@ -590,7 +736,8 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
                 bullets.forEach { b -> 
                     if (b.isEnemy) {
                         val color = damageColors[bullets.indexOf(b) % damageColors.size]
-                        drawCircle(color, radius = 6f, center = b.position) 
+                        drawCircle(color.copy(0.3f), radius = 12f, center = b.position) 
+                        drawCircle(color, radius = 8f, center = b.position) 
                     } else { 
                         drawLine(color = shipAccentColor, start = b.position, end = Offset(b.position.x, b.position.y - 25f), strokeWidth = 4f, cap = StrokeCap.Round)
                     }
@@ -599,14 +746,18 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
             }
 
             // --- HUD ---
-            val formatCentis = (gameTime % 1000) / 10
-            val formatSecs = (gameTime / 1000) % 60
-            val formatMins = (gameTime / 60000)
-            val timeStr = "${formatMins.toString().padStart(2, '0')}:${formatSecs.toString().padStart(2, '0')}:${formatCentis.toString().padStart(2, '0')}"
+            val liveTimeStr by remember {
+                derivedStateOf {
+                    val centis = (gameTime % 1000 / 10).toInt()
+                    val secs = (gameTime / 1000 % 60).toInt()
+                    val mins = (gameTime / 60000).toInt()
+                    "${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${centis.toString().padStart(2, '0')}"
+                }
+            }
             
             val missionStartTime: String = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date()) }
 
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 24.dp).align(Alignment.TopStart), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 32.dp).align(Alignment.TopStart), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
                 Column {
                     Text(
                         text = if (overdriveMode) "OVERDRIVE PROTOCOL" else "AXION COMBAT", 
@@ -618,23 +769,24 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
                             }
                         },
                         color = shipAccentColor, 
-                        style = TextStyle(letterSpacing = 6.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 16.sp)
+                        style = TextStyle(letterSpacing = 2.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
                     )
                     Spacer(Modifier.height(10.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("ORB", color = Color.White.copy(0.5f), fontSize = 10.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(end = 12.dp))
-                        Box(modifier = Modifier.width(160.dp).height(6.dp).background(Color.White.copy(0.1f))) {
+                        Text("ORB", color = Color.White.copy(0.5f), fontSize = 10.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(end = 8.dp))
+                        Box(modifier = Modifier.width(140.dp).height(6.dp).background(Color.White.copy(0.1f))) {
                             Box(modifier = Modifier.fillMaxHeight().fillMaxWidth(animatedHealth).background(Color.White)) 
                         }
-                        Spacer(Modifier.width(12.dp))
-                        Text("${(bossHealth * 20.26f).toInt()}/2026", color = Color.White.copy(0.5f), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        Spacer(Modifier.width(10.dp))
+                        Text("${bossHealth.toInt()}/2026", color = Color.White.copy(0.5f), fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                        Spacer(Modifier.width(16.dp))
+                        Text(text = "ACC: ${accuracy.value}%", color = Color.White.copy(0.8f), style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Normal, fontFamily = FontFamily.Monospace, letterSpacing = 0.sp), maxLines = 1)
                     }
                     Spacer(Modifier.height(10.dp))
-                    Text("$missionStartTime > MISSION START", color = Color.White, fontSize = 10.sp, fontFamily = FontFamily.Monospace, letterSpacing = 1.sp)
+                    Text("$missionStartTime > MISSION START", color = Color.White, fontSize = 10.sp, fontFamily = FontFamily.Monospace, letterSpacing = 0.sp)
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text(text = "T+ $timeStr", color = Color.White, style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Normal, fontFamily = FontFamily.Monospace, letterSpacing = 2.sp))
-                    Text(text = "ACC: ${accuracy.value}%", color = Color.White.copy(0.8f), style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Normal, fontFamily = FontFamily.Monospace, letterSpacing = 2.sp))
+                    Text(text = "T+ $liveTimeStr", color = Color.White, style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, letterSpacing = 0.sp), maxLines = 1)
                 }
             }
 
@@ -643,34 +795,135 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
             }
             
             if (gameStatus == "LEADERBOARD") {
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.96f))) {
-                    Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = if (gameStatus == "WON") "PURITY RESTORED" else "INTEGRITY BREACH", color = Color.White, style = TextStyle(fontSize = 30.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Light, letterSpacing = 8.sp, textAlign = TextAlign.Center))
-                        Spacer(Modifier.height(8.dp))
-                        Text(text = if (gameStatus == "WON") "EXTERNAL INFLUENCE NEUTRALIZED" else "SYSTEM PURITY COMPROMISED", color = Color.White.copy(0.4f), fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 3.sp)
-                        Spacer(Modifier.height(32.dp))
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                             Text("FINAL ACCURACY", color = Color.White.copy(0.5f), fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 4.sp)
-                             Text("${accuracy.value}%", color = Color.White, fontFamily = FontFamily.Monospace, fontSize = 28.sp, fontWeight = FontWeight.Light)
+                val dataStream = remember { List(20) { Random.nextInt(0x1000, 0xFFFF).toString(16).uppercase() } }
+                val streamOffset by rememberInfiniteTransition().animateFloat(0f, 1f, infiniteRepeatable(tween(5000, easing = LinearEasing)))
+                
+                var animState by remember { mutableIntStateOf(0) } // 0: Start, 1: Header, 2: Accuracy, 3: Log, 4: Button
+                val headerText = if (gameStatus == "WON") "PURITY RESTORED" else "INTEGRITY BREACH"
+                var headerVisibleChars by remember { mutableIntStateOf(0) }
+
+                LaunchedEffect(Unit) {
+                    // Stage 1: Header Typewriter
+                    animState = 1
+                    while (headerVisibleChars < headerText.length) {
+                        delay(60)
+                        headerVisibleChars++
+                    }
+                    delay(300)
+                    
+                    // Stage 2: Accuracy
+                    animState = 2
+                    delay(800)
+                    
+                    // Stage 3: Mission Log
+                    animState = 3
+                    delay(600)
+                    
+                    // Stage 4: Ready
+                    animState = 4
+                }
+
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.98f))) {
+                    // Background Data Stream
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        dataStream.forEachIndexed { i, hex ->
+                            val xPos = (i * (size.width / 20))
+                            val yPos = ((streamOffset * size.height) + (i * 100)) % size.height
+                            drawText(
+                                textMeasurer = textMeasurer,
+                                text = hex,
+                                topLeft = Offset(xPos, yPos),
+                                style = TextStyle(color = Color.White.copy(0.05f), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                            )
                         }
-                        Spacer(Modifier.height(32.dp))
-                        Text("MISSION LOG // TOP OPERATIONS", color = Color.White.copy(0.3f), fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 4.sp)
-                        Spacer(Modifier.height(16.dp))
-                        Box(modifier = Modifier.height(180.dp).width(320.dp)) {
-                            LazyColumn(horizontalAlignment = Alignment.CenterHorizontally) {
-                                items(statsManager.history.take(10)) { stat ->
-                                    val date = SimpleDateFormat("MMM dd HH:mm", Locale.getDefault()).format(Date(stat.timestamp))
-                                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                        Text(text = date, color = Color.White.copy(0.4f), fontFamily = FontFamily.Monospace, fontSize = 10.sp, modifier = Modifier.width(90.dp))
-                                        Text(text = stat.time, color = Color.White.copy(0.7f), fontFamily = FontFamily.Monospace, fontSize = 10.sp, textAlign = TextAlign.Center, modifier = Modifier.width(60.dp))
-                                        Text(text = if (stat.result == "WON") "PURGED" else "FAILED", color = if (stat.result == "WON") Color.White else Color.Gray, fontFamily = FontFamily.Monospace, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(60.dp))
-                                        Text(text = "${stat.accuracy}% ACC", color = Color.White, fontFamily = FontFamily.Monospace, fontSize = 10.sp, textAlign = TextAlign.End, modifier = Modifier.width(60.dp))
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(24.dp)
+                            .border(1.dp, Color.White.copy(0.1f))
+                            .padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        // Header with Typewriter
+                        Text(
+                            text = headerText.take(headerVisibleChars), 
+                            color = Color.White, 
+                            style = TextStyle(fontSize = 28.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Light, letterSpacing = 8.sp, textAlign = TextAlign.Center)
+                        )
+                        
+                        AnimatedVisibility(
+                            visible = animState >= 2,
+                            enter = fadeIn(tween(1000)) + expandVertically(expandFrom = Alignment.Top)
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    text = if (gameStatus == "WON") "EXTERNAL INFLUENCE NEUTRALIZED" else "SYSTEM PURITY COMPROMISED", 
+                                    color = Color.White.copy(0.4f), 
+                                    fontFamily = FontFamily.Monospace, 
+                                    fontSize = 10.sp, 
+                                    letterSpacing = 2.sp
+                                )
+                                
+                                Spacer(Modifier.height(48.dp))
+                                
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(modifier = Modifier.size(12.dp).border(1.dp, Color.White.copy(0.4f)))
+                                    Spacer(Modifier.width(16.dp))
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                         Text("FINAL ACCURACY", color = Color.White.copy(0.5f), fontFamily = FontFamily.Monospace, fontSize = 9.sp, letterSpacing = 4.sp)
+                                         Text("${accuracy.value}%", color = Color.White, fontFamily = FontFamily.Monospace, fontSize = 32.sp, fontWeight = FontWeight.ExtraLight)
+                                    }
+                                    Spacer(Modifier.width(16.dp))
+                                    Box(modifier = Modifier.size(12.dp).border(1.dp, Color.White.copy(0.4f)))
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(48.dp))
+                        
+                        AnimatedVisibility(
+                            visible = animState >= 3,
+                            enter = fadeIn(tween(800)) + slideInVertically { it / 2 }
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("MISSION_LOG // SESSION_HISTORY", color = Color.White.copy(0.2f), fontFamily = FontFamily.Monospace, fontSize = 9.sp, letterSpacing = 2.sp)
+                                Spacer(Modifier.height(16.dp))
+                                
+                                Box(modifier = Modifier.height(180.dp).width(320.dp)) {
+                                    LazyColumn(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        items(statsManager.history.take(10)) { stat ->
+                                            val date = SimpleDateFormat("MMM dd HH:mm", Locale.getDefault()).format(Date(stat.timestamp))
+                                            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                                Text(text = date, color = Color.White.copy(0.3f), fontFamily = FontFamily.Monospace, fontSize = 9.sp, modifier = Modifier.width(90.dp))
+                                                Text(text = stat.time, color = Color.White.copy(0.6f), fontFamily = FontFamily.Monospace, fontSize = 10.sp, textAlign = TextAlign.Center, modifier = Modifier.width(60.dp))
+                                                Text(text = if (stat.result == "WON") "PURGED" else "FAILED", color = if (stat.result == "WON") Color.White else Color.Gray, fontFamily = FontFamily.Monospace, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(60.dp))
+                                                Text(text = "${stat.accuracy}%", color = Color.White.copy(0.4f), fontFamily = FontFamily.Monospace, fontSize = 9.sp, textAlign = TextAlign.End, modifier = Modifier.width(50.dp))
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
+                        
                         Spacer(Modifier.height(48.dp))
-                        Text("TAP TO REINITIALIZE >", modifier = Modifier.clickable { scope.launch { destructionProgress.snapTo(0f) }; onExit() }, color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        
+                        AnimatedVisibility(
+                            visible = animState >= 4,
+                            enter = fadeIn(tween(1000))
+                        ) {
+                            Text(
+                                text = "[ REINITIALIZE_CORE ]", 
+                                modifier = Modifier.clickable { scope.launch { destructionProgress.snapTo(0f) }; onExit() }, 
+                                color = Color.White, 
+                                fontSize = 12.sp, 
+                                fontFamily = FontFamily.Monospace, 
+                                fontWeight = FontWeight.Bold, 
+                                letterSpacing = 2.sp
+                            )
+                        }
                     }
                 }
             }
