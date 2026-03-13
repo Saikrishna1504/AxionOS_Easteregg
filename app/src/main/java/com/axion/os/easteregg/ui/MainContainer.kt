@@ -54,7 +54,7 @@ fun MainContainer() {
                 "SPLASH" -> SplashScreen(onFinish = { gameState = "ANIMATION" })
                 "ANIMATION" -> AtomCrashGame(onFinish = { gameState = "PREP" })
                 "PREP" -> CombatPrepScreen(onStart = { gameState = "GAME" })
-                "GAME" -> SpaceGame(statsManager = statsManager, onExit = { gameState = "SPLASH" })
+                "GAME" -> SpaceGame(statsManager = statsManager, onExit = { gameState = "PREP" })
             }
         }
     }

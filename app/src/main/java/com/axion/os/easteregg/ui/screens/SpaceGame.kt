@@ -287,7 +287,7 @@ fun SpaceGame(statsManager: StatsManager, onExit: () -> Unit) {
                             } }
                         } }
                         Spacer(Modifier.height(48.dp)); AnimatedVisibility(visible = aS >= 4, enter = fadeIn(tween(1000))) { 
-                            Text(text = "[ REINITIALIZE_CORE ]", modifier = Modifier.clickable { onExit() }, color = Color.White, style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, fontFamily = FontFamily.Monospace)) 
+                            Text(text = "[ RE-ENGAGE_SYSTEM ]", modifier = Modifier.clickable { onExit() }, color = Color.White, style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, fontFamily = FontFamily.Monospace)) 
                         }
                     }
                 }
